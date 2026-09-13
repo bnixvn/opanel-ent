@@ -77,3 +77,6 @@ images.zip
 
 # Codebase memory
 .codebase-memory/
+
+# Go build output
+/dist/
