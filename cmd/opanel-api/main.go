@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/sites"
+	"github.com/bnixvn/opanel-ent/internal/tlsx"
 	"github.com/bnixvn/opanel-ent/internal/version"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
@@ -80,17 +82,37 @@ func run(cfg *config.Config, log *slog.Logger) error {
 	api.StartBackgroundTasks(ctx)
 
 	srv := api.HTTPServer()
+	tlsMode := "off"
+	if cfg.TLSEnabled {
+		cert, err := loadCertificate(cfg)
+		if err != nil {
+			return err
+		}
+		srv.TLSConfig = tlsx.ServerConfig(cert)
+		tlsMode = "self-signed"
+		if cfg.TLSCertFile != "" {
+			tlsMode = "supplied"
+		}
+	}
+
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("opanel-api: listening",
-			"addr", cfg.ListenAddr,
+			"url", cfg.Scheme()+"://"+cfg.ListenAddr,
+			"tls", tlsMode,
 			"version", version.String(),
 			"db", database.Path(),
 			"schema", schema,
 			"env", cfg.Env,
 			"webserver", cfg.WebserverBackend,
 		)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if cfg.TLSEnabled {
+			err = srv.ListenAndServeTLS("", "")
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
 	}()
@@ -108,6 +130,23 @@ func run(cfg *config.Config, log *slog.Logger) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// loadCertificate uses a supplied certificate when there is one and otherwise
+// generates a self-signed pair covering the host's own addresses.
+func loadCertificate(cfg *config.Config) (tls.Certificate, error) {
+	if cfg.TLSCertFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			return tls.Certificate{}, fmt.Errorf("load TLS certificate: %w", err)
+		}
+		return cert, nil
+	}
+	hosts := tlsx.LocalAddresses()
+	if cfg.PanelHost != "" {
+		hosts = append(hosts, cfg.PanelHost)
+	}
+	return tlsx.LoadOrCreateSelfSigned(cfg.TLSDir, hosts)
 }
 
 func newLogger(level string) *slog.Logger {

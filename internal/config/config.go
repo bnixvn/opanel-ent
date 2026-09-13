@@ -26,8 +26,18 @@ type Config struct {
 	DBPath      string // <DataDir>/opanel.db
 	AgentSocket string // /run/opanel/agent.sock
 
-	ListenAddr string // host:port for the HTTP API
+	ListenAddr string // host:port for the API listener
 	PanelHost  string // hostname used in absolute URLs and cookie scoping
+
+	// TLS is on by default. The panel carries administrator credentials over
+	// the public internet, so plain HTTP is only acceptable on loopback.
+	// When no certificate is supplied one is generated and self-signed --
+	// a browser warning beats a password in clear text, and Let's Encrypt
+	// needs a resolvable hostname the panel may not have yet.
+	TLSEnabled  bool
+	TLSCertFile string
+	TLSKeyFile  string
+	TLSDir      string
 
 	SessionTTL     time.Duration
 	SessionIdleTTL time.Duration
@@ -58,13 +68,17 @@ func Load() (*Config, error) {
 		Env:              env("OPANEL_ENV", EnvProd),
 		DataDir:          env("OPANEL_DATA_DIR", "/var/lib/opanel"),
 		AgentSocket:      env("OPANEL_AGENT_SOCKET", "/run/opanel/agent.sock"),
-		ListenAddr:       env("OPANEL_LISTEN", "127.0.0.1:2222"),
+		ListenAddr:       env("OPANEL_LISTEN", "0.0.0.0:2222"),
+		TLSCertFile:      env("OPANEL_TLS_CERT", ""),
+		TLSKeyFile:       env("OPANEL_TLS_KEY", ""),
 		PanelHost:        env("OPANEL_PANEL_HOST", ""),
 		WebserverBackend: env("OPANEL_WEBSERVER_BACKEND", BackendOLS),
 		PHPProvider:      env("OPANEL_PHP_PROVIDER", ""),
 		LogLevel:         env("OPANEL_LOG_LEVEL", "info"),
 	}
 	c.DBPath = env("OPANEL_DB_PATH", filepath.Join(c.DataDir, "opanel.db"))
+	c.TLSDir = env("OPANEL_TLS_DIR", filepath.Join(c.DataDir, "tls"))
+	c.TLSEnabled = envBool("OPANEL_TLS", true)
 
 	var err error
 	if c.SessionTTL, err = envDuration("OPANEL_SESSION_TTL", 12*time.Hour); err != nil {
@@ -110,6 +124,9 @@ func (c *Config) Validate() error {
 	if !strings.Contains(c.ListenAddr, ":") {
 		errs = append(errs, fmt.Errorf("OPANEL_LISTEN: want host:port, got %q", c.ListenAddr))
 	}
+	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
+		errs = append(errs, errors.New("OPANEL_TLS_CERT and OPANEL_TLS_KEY must be set together"))
+	}
 	if c.SessionIdleTTL > c.SessionTTL {
 		errs = append(errs, fmt.Errorf("OPANEL_SESSION_IDLE_TTL (%s) must not exceed OPANEL_SESSION_TTL (%s)",
 			c.SessionIdleTTL, c.SessionTTL))
@@ -118,12 +135,37 @@ func (c *Config) Validate() error {
 }
 
 // SecureCookies reports whether session cookies get the Secure attribute.
-// Dev mode drops it so the panel works over plain HTTP on a workstation.
-func (c *Config) SecureCookies() bool { return c.Env == EnvProd }
+//
+// Tied to TLS rather than to the environment: a Secure cookie is simply not
+// sent over plain HTTP, so setting it on a non-TLS listener locks everyone out
+// instead of protecting them.
+func (c *Config) SecureCookies() bool { return c.TLSEnabled && c.Env == EnvProd }
+
+// Scheme is the URL scheme the panel answers on.
+func (c *Config) Scheme() string {
+	if c.TLSEnabled {
+		return "https"
+	}
+	return "http"
+}
 
 func env(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		return v
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return def
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false", "no", "off":
+		return false
+	case "1", "true", "yes", "on":
+		return true
 	}
 	return def
 }
