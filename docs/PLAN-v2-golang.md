@@ -463,6 +463,36 @@ Provider chỉ mở cổng 22. Đo được: 80/443 trả `filtered` kể cả k
 
 **Còn nợ sang Phase 3:** WordPress installer + WP-CLI (đã lên lịch Phase 3), và `opanelctl install` chưa được thử trên máy hoàn toàn trắng — mới thử idempotent trên máy đã cấu hình.
 
+## ⚠ LỘ TRÌNH ĐÃ ĐỔI THỨ TỰ — 2026-09-14
+
+Sau khi đối chiếu `docs/feature-parity.md` (6/22 tính năng v1 đã xong), thứ tự
+Phase 3–6 được sắp lại theo **thời điểm bán được hàng** thay vì theo tầng kiến
+trúc. Nội dung công việc không đổi, chỉ đổi thứ tự.
+
+Nguyên tắc: một khách shared hosting tối thiểu cần **database, SSL cho site,
+backup**; nhà cung cấp cần **quota và WHMCS** để thu tiền. Terminal, file
+manager, quét mã độc, dashboard tài nguyên là thứ bán được mà chưa cần có ngay
+từ ngày đầu.
+
+| # | Việc | Vì sao ở vị trí này |
+|---|---|---|
+| **S1** | Database MariaDB + user + phpMyAdmin SSO | WordPress không chạy được nếu thiếu. Chặn mọi thứ phía sau |
+| **S2** | SSL cho từng site + auto-renew | Không có HTTPS thì không bán được năm 2026. Cũng sửa luôn việc Chrome HTTPS-First báo lỗi với site mới |
+| **S3** | WordPress one-click + WP-CLI | Phần lớn khách mua hosting là để chạy WordPress |
+| **S4** | Backup + restore + lịch | Khách không giao dữ liệu cho nhà cung cấp không có backup |
+| **S5** | Quota dung lượng + giới hạn số site + hosting plan | Không có thì không ép được gói |
+| **S6** | API token endpoint + provisioning + module WHMCS | Để thu tiền tự động |
+| **S7** | Endpoint bật 2FA, quản lý API token, firewall API | Lấp ba thứ đang làm dở |
+| **S8** | WAF, quét mã độc, cron, dashboard tài nguyên, update OS | Vận hành, làm sau khi đã có doanh thu |
+| **S9** | File manager, terminal | Tiện ích |
+| **S10** | Import DirectAdmin | Kéo khách từ host khác — quan trọng nhưng phức tạp nhất |
+| **S11** | Stage B: CloudLinux + LSWS Enterprise + LVE | Như plan cũ |
+
+Các mục Phase 3–6 bên dưới giữ nguyên để tham chiếu nội dung; thứ tự thực thi
+theo bảng trên.
+
+---
+
 ### Phase 3 — Hạ tầng vận hành *(2 tuần)*
 
 MariaDB provisioning + tuner + phpMyAdmin SSO; SSL bằng lego (HTTP-01 + DNS-01, auto-renew, hot reload); firewall nftables đầy đủ; WordPress installer + WP-CLI (dùng đúng PHP của site).

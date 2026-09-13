@@ -1,6 +1,6 @@
 # Đối chiếu tính năng v1 (Python) ↔ v2 (Go)
 
-Cập nhật: 2026-09-14, sau Phase 2.
+Cập nhật: 2026-09-14, sau S1 (database).
 
 **Không có tính năng nào bị xoá.** Toàn bộ code v1 vẫn nằm nguyên trong repo
 (`backend/`, `frontend/`, `installer/install.sh`…) và chưa bị đụng tới. v2 là
@@ -15,9 +15,9 @@ phẩm thụt lùi. Bảng dưới là con số thật.
 | | Số lượng |
 |---|---|
 | Tính năng v1 (theo README) | 22 |
-| v2 đã xong | **6** |
+| v2 đã xong | **8** |
 | v2 làm dở (có code, thiếu API/UI) | **3** |
-| v2 chưa bắt đầu | **13** |
+| v2 chưa bắt đầu | **11** |
 
 ## Đã xong
 
@@ -29,6 +29,8 @@ phẩm thụt lùi. Bảng dưới là con số thật.
 | 4 | Multi-PHP: cài/gỡ, chọn version theo từng site | 8.1–8.5 (repo el10 không có 7.4) |
 | 5 | Phân quyền Admin / Reseller / End user | |
 | 6 | Admin tạo site thay mặt user, mỗi site một chủ | |
+| 7 | **Quản lý database MariaDB** — tạo/xoá DB, tài khoản, phân quyền, xem dung lượng | Tên có tiền tố chủ sở hữu; cô lập đã kiểm chứng |
+| 8 | **SSL Let's Encrypt** cho panel, cấp in-process bằng lego | Cho từng site vẫn còn thiếu (S2) |
 
 Ngoài danh sách v1, v2 có thêm: audit log hai lớp, TLS cho panel, cấp cert
 Let's Encrypt in-process, rollback tự động khi apply config hỏng, installer
@@ -49,11 +51,11 @@ một lệnh idempotent.
 | 1 | Dashboard tài nguyên CPU/RAM/disk/network | 4 |
 | 2 | WordPress one-click + WP-CLI | 3 |
 | 3 | Giới hạn số site + quota dung lượng theo user | 5 |
-| 4 | Quản lý database MariaDB + phpMyAdmin SSO | 3 |
+| 4 | phpMyAdmin SSO (database engine đã xong) | S1 còn lại |
 | 5 | Auto-tuner MariaDB | 3 |
 | 6 | Auto-tuner PHP/LSPHP (OPcache, LSAPI worker) | 3 |
 | 7 | **Editor cấu hình PHP theo version** | 3 |
-| 8 | SSL Let's Encrypt **cho từng site** | 3 |
+| 8 | SSL Let's Encrypt **cho từng site** | S2 (tiếp theo) |
 | 9 | File manager | 4 |
 | 10 | Backup: file + SQL, lịch, restore, tải lên/xuống | 4 |
 | 11 | SFTP backup target | 4 |

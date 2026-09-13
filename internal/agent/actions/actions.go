@@ -30,6 +30,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerSystemd(r)
 	registerPackages(r)
 	registerSites(r, deps)
+	registerDatabases(r)
 }
 
 // PingResult is the reply to "ping".

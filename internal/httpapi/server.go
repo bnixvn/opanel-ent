@@ -12,35 +12,38 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/config"
+	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 )
 
 // Server holds the dependencies every handler needs.
 type Server struct {
-	cfg   *config.Config
-	db    *db.DB
-	auth  *auth.Service
-	agent *agentclient.Client
-	sites *sites.Service
-	log   *slog.Logger
+	cfg       *config.Config
+	db        *db.DB
+	auth      *auth.Service
+	agent     *agentclient.Client
+	sites     *sites.Service
+	databases *databases.Service
+	log       *slog.Logger
 
 	loginLimiter *limiter
 	handler      http.Handler
 }
 
 // New builds the API server and its route table.
-func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, log *slog.Logger) *Server {
+func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	s := &Server{
-		cfg:   cfg,
-		db:    database,
-		auth:  authSvc,
-		agent: ac,
-		sites: siteSvc,
-		log:   log,
+		cfg:       cfg,
+		db:        database,
+		auth:      authSvc,
+		agent:     ac,
+		sites:     siteSvc,
+		databases: dbSvc,
+		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
 		loginLimiter: newLimiter(5, time.Minute),
@@ -80,6 +83,16 @@ func (s *Server) routes() http.Handler {
 
 			// Choosing a PHP version needs the list, so any authenticated
 			// user may read it; changing what is installed does not.
+			// Databases. Ownership is enforced per request, like sites.
+			pr.Get("/databases", s.handleDatabaseList)
+			pr.Post("/databases", s.handleDatabaseCreate)
+			pr.Delete("/databases/{id}", s.handleDatabaseDelete)
+			pr.Post("/databases/{id}/grants", s.handleGrant)
+			pr.Delete("/databases/{id}/grants/{userID}", s.handleRevoke)
+			pr.Post("/database-users", s.handleDBUserCreate)
+			pr.Delete("/database-users/{id}", s.handleDBUserDelete)
+			pr.Post("/database-users/{id}/password", s.handleDBUserPassword)
+
 			pr.Get("/php/versions", s.handlePHPList)
 			pr.Get("/webserver/status", s.handleWebserverStatus)
 

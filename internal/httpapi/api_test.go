@@ -15,6 +15,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/config"
+	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/sites"
@@ -55,7 +56,8 @@ func newFixture(t *testing.T) *fixture {
 	ac := agentclient.New(filepath.Join(t.TempDir(), "absent.sock"), 2*time.Second)
 
 	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), discardLogger())
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, discardLogger())
+	dbSvc := databases.New(database, ac, discardLogger())
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, discardLogger())
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
 

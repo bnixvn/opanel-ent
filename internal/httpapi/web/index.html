@@ -104,6 +104,7 @@
     <h1 class="brand">OPanel</h1>
     <nav>
       <button data-tab="sites" aria-current="page">Sites</button>
+      <button data-tab="databases">Databases</button>
       <button data-tab="php">PHP</button>
       <button data-tab="system">System</button>
     </nav>
@@ -141,6 +142,55 @@
           <tbody></tbody>
         </table></div>
         <div class="empty hidden" id="sitesEmpty">No sites yet.</div>
+      </div>
+    </section>
+
+    <section data-panel="databases" class="hidden">
+      <div class="card">
+        <h2>New database</h2>
+        <form id="newDb" class="row">
+          <div class="field"><label for="ndName">Name</label>
+            <input id="ndName" placeholder="wordpress" required style="width:100%"></div>
+          <div class="field"><label for="ndOwner">Owner</label>
+            <select id="ndOwner" style="width:100%"></select></div>
+          <div><button class="act primary" type="submit">Create database</button></div>
+        </form>
+        <p class="muted" style="margin:.6rem 0 0;font-size:.83rem">
+          The owner&#39;s name is added as a prefix, so <code>wordpress</code> owned by
+          <code>alice</code> becomes <code>alice_wordpress</code>.</p>
+      </div>
+
+      <div class="card">
+        <h2>New database user</h2>
+        <form id="newDbUser" class="row">
+          <div class="field"><label for="nuName">Name</label>
+            <input id="nuName" placeholder="wp" required style="width:100%"></div>
+          <div class="field"><label for="nuOwner">Owner</label>
+            <select id="nuOwner" style="width:100%"></select></div>
+          <div><button class="act primary" type="submit">Create user</button></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Databases</h2>
+        <div class="scroll"><table id="dbTable">
+          <thead><tr><th>Name</th><th>Owner</th><th>Size</th><th>Users with access</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="dbEmpty">No databases yet.</div>
+      </div>
+
+      <div class="card">
+        <h2>Database users</h2>
+        <div class="scroll"><table id="dbUserTable">
+          <thead><tr><th>Username</th><th>Owner</th><th>Databases</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="dbUserEmpty">No database users yet.</div>
+        <p class="muted" style="margin:.8rem 0 0;font-size:.83rem">
+          Connect from an application with host <code id="dbHost">127.0.0.1</code>.
+          Passwords are shown once when created or reset and are not stored anywhere
+          the panel can read back.</p>
       </div>
     </section>
 
@@ -251,6 +301,7 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
   b.setAttribute("aria-current", "page");
   $$("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   if (b.dataset.tab === "system") loadSystem();
+  if (b.dataset.tab === "databases") loadDatabases();
 }));
 
 /* ---------- sites ---------- */
@@ -326,6 +377,157 @@ $("#newSite").addEventListener("submit", async e => {
 
 $("#nsType").addEventListener("change", () =>
   $("#nsPhp").disabled = $("#nsType").value === "static");
+
+/* ---------- databases ---------- */
+
+const fmtBytes = n => {
+  if (!n) return "\u2014";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
+};
+
+let dbUsersCache = [];
+
+async function loadDatabases() {
+  let data;
+  try { data = await api("/databases"); }
+  catch (err) { note("#msg", err.message); return; }
+
+  $("#dbHost").textContent = data.host;
+  dbUsersCache = data.users;
+
+  const dt = $("#dbTable tbody");
+  dt.innerHTML = "";
+  $("#dbEmpty").classList.toggle("hidden", data.databases.length > 0);
+  $("#dbTable").classList.toggle("hidden", data.databases.length === 0);
+
+  for (const d of data.databases) {
+    const eligible = data.users.filter(u => u.owner_id === d.owner_id && !d.users.includes(u.username));
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><code>${esc(d.name)}</code></td>` +
+      `<td>${esc(d.owner)}</td>` +
+      `<td class="muted">${fmtBytes(d.size_bytes)}</td>` +
+      `<td>${d.users.length
+        ? d.users.map(u => `<span class="tag mute">${esc(u)} ` +
+            `<a href="#" data-revoke="${d.id}" data-user="${esc(u)}" title="Revoke access">&times;</a></span>`).join(" ")
+        : '<span class="muted">none</span>'}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        (eligible.length
+          ? `<select data-grantdb="${d.id}"><option value="">grant access\u2026</option>` +
+            eligible.map(u => `<option value="${u.id}">${esc(u.username)}</option>`).join("") + `</select> `
+          : "") +
+        `<button class="act danger" data-dbdel="${d.id}" data-name="${esc(d.name)}">Delete</button>` +
+      `</td>`;
+    dt.appendChild(tr);
+  }
+
+  const ut = $("#dbUserTable tbody");
+  ut.innerHTML = "";
+  $("#dbUserEmpty").classList.toggle("hidden", data.users.length > 0);
+  $("#dbUserTable").classList.toggle("hidden", data.users.length === 0);
+
+  for (const u of data.users) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><code>${esc(u.username)}</code></td>` +
+      `<td>${esc(u.owner)}</td>` +
+      `<td>${u.databases.length
+        ? u.databases.map(n => `<span class="tag mute">${esc(n)}</span>`).join(" ")
+        : '<span class="muted">none</span>'}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        `<button class="act" data-dbpw="${u.id}" data-name="${esc(u.username)}">Reset password</button> ` +
+        `<button class="act danger" data-dbudel="${u.id}" data-name="${esc(u.username)}">Delete</button>` +
+      `</td>`;
+    ut.appendChild(tr);
+  }
+
+  $$("[data-grantdb]", dt).forEach(sel => sel.addEventListener("change", () => {
+    if (!sel.value) return;
+    dbGuard(() => api(`/databases/${sel.dataset.grantdb}/grants`, {
+      method: "POST", body: JSON.stringify({ user_id: Number(sel.value) }),
+    }), "Access granted");
+  }));
+  $$("[data-revoke]", dt).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    const u = dbUsersCache.find(x => x.username === a.dataset.user);
+    if (!u) return;
+    dbGuard(() => api(`/databases/${a.dataset.revoke}/grants/${u.id}`, { method: "DELETE" }), "Access revoked");
+  }));
+  $$("[data-dbdel]", dt).forEach(b => b.addEventListener("click", () => {
+    if (!confirm(`Delete database ${b.dataset.name}?\n\nEverything in it is destroyed and cannot be recovered.`)) return;
+    dbGuard(() => api(`/databases/${b.dataset.dbdel}`, { method: "DELETE" }), "Database deleted");
+  }));
+  $$("[data-dbudel]", ut).forEach(b => b.addEventListener("click", () => {
+    if (!confirm(`Delete database user ${b.dataset.name}?`)) return;
+    dbGuard(() => api(`/database-users/${b.dataset.dbudel}`, { method: "DELETE" }), "User deleted");
+  }));
+  $$("[data-dbpw]", ut).forEach(b => b.addEventListener("click", async () => {
+    note("#msg", "");
+    try {
+      const res = await api(`/database-users/${b.dataset.dbpw}/password`, { method: "POST" });
+      showSecret(`New password for ${b.dataset.name}`, res.password);
+    } catch (err) { note("#msg", err.message); }
+  }));
+
+  const owners = ownerOptions();
+  $("#ndOwner").innerHTML = owners;
+  $("#nuOwner").innerHTML = owners;
+}
+
+async function dbGuard(fn, okMsg) {
+  note("#msg", "");
+  try { await fn(); note("#msg", okMsg, "ok"); }
+  catch (err) { note("#msg", err.message); }
+  await loadDatabases();
+}
+
+// A generated password is shown exactly once; the panel cannot read it back.
+// Rendered as a persistent block rather than a toast so it cannot be missed
+// or cleared by the next message.
+function showSecret(title, secret) {
+  const el = $("#msg");
+  el.innerHTML =
+    `<div class="msg ok"><strong></strong><br>` +
+    `<code style="font-size:1.05em;user-select:all"></code><br>` +
+    `<span class="muted" style="font-size:.85em">Copy it now \u2014 it is not stored and cannot be shown again.</span></div>`;
+  el.querySelector("strong").textContent = title;
+  el.querySelector("code").textContent = secret;
+}
+
+$("#newDb").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#ndName").value.trim();
+  note("#msg", "");
+  try {
+    const rec = await api("/databases", {
+      method: "POST",
+      body: JSON.stringify({ name, owner_id: Number($("#ndOwner").value) || undefined }),
+    });
+    $("#ndName").value = "";
+    note("#msg", `Created ${rec.name}`, "ok");
+  } catch (err) { note("#msg", err.message); }
+  await loadDatabases();
+});
+
+$("#newDbUser").addEventListener("submit", async e => {
+  e.preventDefault();
+  const username = $("#nuName").value.trim();
+  note("#msg", "");
+  try {
+    const res = await api("/database-users", {
+      method: "POST",
+      body: JSON.stringify({ username, owner_id: Number($("#nuOwner").value) || undefined }),
+    });
+    $("#nuName").value = "";
+    await loadDatabases();
+    showSecret(`Password for ${res.user.username}`, res.password);
+    return;
+  } catch (err) { note("#msg", err.message); }
+  await loadDatabases();
+});
 
 /* ---------- php ---------- */
 
@@ -429,18 +631,28 @@ async function loadSystem() {
 
 /* ---------- boot ---------- */
 
+let ownersSeen = new Map();
+
+// ownerOptions renders an owner picker from the cached list.
+function ownerOptions() {
+  return [...ownersSeen].map(([id, name]) =>
+    `<option value="${id}"${id === me.id ? " selected" : ""}>${esc(name)}</option>`).join("");
+}
+
 async function loadOwners() {
   // There is no users endpoint yet, so the owner list is derived from the
   // sites that already exist plus the signed-in account. Phase 5 replaces
   // this with a real listing.
-  const sel = $("#nsOwner");
-  const seen = new Map([[me.id, me.username]]);
+  ownersSeen = new Map([[me.id, me.username]]);
   try {
     const { sites } = await api("/sites");
-    for (const s of sites) seen.set(s.owner_id, s.owner);
+    for (const s of sites) ownersSeen.set(s.owner_id, s.owner);
   } catch {}
-  sel.innerHTML = [...seen].map(([id, name]) =>
-    `<option value="${id}"${id === me.id ? " selected" : ""}>${esc(name)}</option>`).join("");
+  try {
+    const res = await api("/databases");
+    for (const d of res.databases) ownersSeen.set(d.owner_id, d.owner);
+  } catch {}
+  $("#nsOwner").innerHTML = ownerOptions();
 }
 
 async function start() {

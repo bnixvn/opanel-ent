@@ -136,13 +136,14 @@ func cmdInstall(ctx context.Context, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Printf("Panel:  http://<server-ip>:%d\n", opts.PanelPort)
+	fmt.Printf("Panel:  https://<server-ip>:%d\n", opts.PanelPort)
 	fmt.Printf("Config: %s/opanel.env\n", installer.ConfigDir)
 	fmt.Printf("Data:   %s\n", cfg.DataDir)
 	fmt.Println()
-	fmt.Println("The API listens on 127.0.0.1 by default. To reach it from outside, set")
-	fmt.Printf("OPANEL_LISTEN=0.0.0.0:%d in %s/opanel.env and restart opanel-api,\n", opts.PanelPort, installer.ConfigDir)
-	fmt.Println("and make sure your provider's firewall allows 80, 443 and that port.")
+	fmt.Println("The panel serves HTTPS with a self-signed certificate, so the first visit")
+	fmt.Println("shows a browser warning. Replace it with a real one once the hostname")
+	fmt.Println("resolves to this server:")
+	fmt.Println("  opanelctl cert issue --panel <hostname> <email>")
 	return nil
 }
 

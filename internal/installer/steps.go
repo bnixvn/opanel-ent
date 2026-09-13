@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/template"
 	"time"
 
@@ -51,6 +52,9 @@ func allSteps() []Step {
 		{Name: "Add LiteSpeed repository", Check: checkFile("/etc/yum.repos.d/litespeed.repo"), Apply: stepLiteSpeedRepo},
 		{Name: "Install OpenLiteSpeed", Check: checkOLS, Apply: stepInstallOLS},
 		{Name: "Install PHP", Check: checkPHP, Apply: stepInstallPHP},
+		{Name: "Add MariaDB repository", Check: checkFile("/etc/yum.repos.d/mariadb.repo"), Apply: stepMariaDBRepo},
+		{Name: "Install MariaDB", Check: checkMariaDB, Apply: stepInstallMariaDB},
+		{Name: "Harden MariaDB", Check: checkMariaDBHardened, Apply: stepHardenMariaDB},
 		{Name: "Create service accounts", Check: checkAccounts, Apply: stepAccounts},
 		{Name: "Create directories", Apply: stepDirectories},
 		{Name: "Install binaries", Apply: stepBinaries},
@@ -159,6 +163,77 @@ func stepInstallPHP(ctx context.Context, o *Options) error {
 		if err := p.Install(ctx, v); err != nil {
 			return fmt.Errorf("install PHP %s: %w", v, err)
 		}
+	}
+	return nil
+}
+
+// MariaDBVersion is the series installed. 11.8 is the current long-term
+// release, supported to mid-2028. AlmaLinux 10's own AppStream carries only
+// 10.11, so the vendor repository is required.
+const MariaDBVersion = "11.8"
+
+func stepMariaDBRepo(ctx context.Context, _ *Options) error {
+	script := fmt.Sprintf(
+		"curl -LsS --connect-timeout 15 --max-time 180 https://r.mariadb.com/downloads/mariadb_repo_setup "+
+			"| bash -s -- --os-type=rhel --os-version=10 --mariadb-server-version=mariadb-%s",
+		MariaDBVersion)
+	res, err := run.Cmd(ctx, []string{"bash", "-c", script}, run.Timeout(5*time.Minute))
+	if err != nil {
+		return fmt.Errorf("add MariaDB repository: %w (%s)", err, res.Output())
+	}
+	return nil
+}
+
+func checkMariaDB(ctx context.Context, _ *Options) (bool, error) {
+	// Capital M: the vendor packages are MariaDB-server, and the lowercase
+	// mariadb-server from AppStream is a different, older package.
+	return pkgmgr.Installed(ctx, "MariaDB-server")
+}
+
+func stepInstallMariaDB(ctx context.Context, _ *Options) error {
+	if err := pkgmgr.Install(ctx, "MariaDB-server", "MariaDB-client"); err != nil {
+		return err
+	}
+	return svc.Enable(ctx, "mariadb", true)
+}
+
+// checkMariaDBHardened reports whether the insecure defaults are already gone.
+//
+// A separate step from installation, with its own check, because bundling the
+// two meant hardening never ran on a host where MariaDB happened to be
+// installed already — which is exactly what happened here, leaving anonymous
+// accounts and the test database in place on a server that had been through
+// the installer twice.
+func checkMariaDBHardened(ctx context.Context, _ *Options) (bool, error) {
+	if ok, _ := pkgmgr.Installed(ctx, "MariaDB-server"); !ok {
+		return true, nil // nothing to harden yet
+	}
+	const q = `SELECT (SELECT COUNT(*) FROM mysql.global_priv WHERE User='') + ` +
+		`(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='test')`
+	res, err := run.Cmd(ctx, []string{"mariadb", "-u", "root", "-N", "-B", "-e", q},
+		run.Timeout(30*time.Second))
+	if err != nil {
+		return false, nil // cannot tell, so try
+	}
+	return strings.TrimSpace(res.Stdout) == "0", nil
+}
+
+// stepHardenMariaDB removes what a fresh install leaves behind.
+//
+// The root account authenticates through the unix_socket plugin, so there is
+// no password to set. What does need removing is the anonymous account and
+// the test database: together they let anyone with a shell on the box connect
+// with no credentials and write data.
+func stepHardenMariaDB(ctx context.Context, _ *Options) error {
+	// Backquoted so the SQL LIKE escape stays a single backslash rather than
+	// being read as a Go escape sequence.
+	const harden = `DELETE FROM mysql.global_priv WHERE User=''; ` +
+		`DROP DATABASE IF EXISTS test; ` +
+		`DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%'; ` +
+		`FLUSH PRIVILEGES;`
+	if _, err := run.Cmd(ctx, []string{"mariadb", "-u", "root", "-e", harden},
+		run.Timeout(60*time.Second)); err != nil {
+		return fmt.Errorf("harden MariaDB: %w", err)
 	}
 	return nil
 }
