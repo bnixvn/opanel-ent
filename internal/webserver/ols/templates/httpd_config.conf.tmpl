@@ -1,0 +1,176 @@
+#
+# {{ .Config.PanelManagedComment }}
+#
+
+serverName
+user                             {{ .Config.ServerUser }}
+group                            {{ .Config.ServerGroup }}
+priority                         0
+autoRestart                      1
+chrootPath                       /
+enableChroot                     0
+inMemBufSize                     60M
+swappingDir                      /tmp/lshttpd/swap
+autoFix503                       1
+gracefulRestartTimeout           300
+mime                             conf/mime.properties
+showVersionNumber                0
+adminEmails                      {{ .Config.AdminEmail }}
+indexFiles                       index.html, index.php
+disableWebAdmin                  0
+
+errorlog logs/error.log {
+    logLevel                     NOTICE
+    debugLevel                   0
+    rollingSize                  10M
+    enableStderrLog              1
+}
+
+accessLog logs/access.log {
+    rollingSize                  10M
+    keepDays                     30
+    compressArchive              1
+    logReferer                   1
+    logUserAgent                 1
+}
+
+expires {
+    enableExpires                1
+    expiresByType                image/*=A604800,text/css=A604800,application/x-javascript=A604800,application/javascript=A604800,font/*=A604800,application/x-font-ttf=A604800
+}
+
+tuning {
+    maxConnections               10000
+    maxSSLConnections            10000
+    connTimeout                  300
+    maxKeepAliveReq              10000
+    smartKeepAlive               0
+    keepAliveTimeout             5
+    sndBufSize                   0
+    rcvBufSize                   0
+    gzipStaticCompressLevel      6
+    gzipMaxFileSize              10M
+    eventDispatcher              best
+    maxCachedFileSize            4096
+    totalInMemCacheSize          20M
+    maxMMapFileSize              256K
+    totalMMapCacheSize           40M
+    useSendfile                  1
+    fileETag                     28
+    SSLCryptoDevice              null
+    maxReqURLLen                 32768
+    maxReqHeaderSize             65536
+    maxReqBodySize               2047M
+    maxDynRespHeaderSize         32768
+    maxDynRespSize               2047M
+    enableGzipCompress           1
+    enableBrCompress             4
+    enableDynGzipCompress        1
+    gzipCompressLevel            6
+    brStaticCompressLevel        6
+    compressibleTypes            default
+    gzipAutoUpdateStatic         1
+    gzipMinFileSize              300
+    quicEnable                   1
+    quicShmDir                   /dev/shm
+}
+
+accessDenyDir {
+    dir                          /
+    dir                          /etc/*
+    dir                          /dev/*
+    dir                          conf/*
+    dir                          admin/conf/*
+}
+
+fileAccessControl {
+    followSymbolLink             1
+    checkSymbolLink              0
+    requiredPermissionMask       000
+    restrictedPermissionMask     000
+}
+
+perClientConnLimit {
+    staticReqPerSec              0
+    dynReqPerSec                 0
+    outBandwidth                 0
+    inBandwidth                  0
+    softLimit                    10000
+    hardLimit                    10000
+    gracePeriod                  15
+    banPeriod                    300
+}
+
+# minUID and minGID gate which accounts an external application may run as.
+# Site owners are created above UID_MIN (1000), so the stock floor of 11 is
+# already permissive enough and is left alone.
+CGIRLimit {
+    maxCGIInstances              20
+    minUID                       11
+    minGID                       10
+    priority                     0
+    CPUSoftLimit                 10
+    CPUHardLimit                 50
+    memSoftLimit                 2047M
+    memHardLimit                 2047M
+    procSoftLimit                400
+    procHardLimit                450
+}
+
+accessControl {
+    allow                        ALL
+    deny
+}
+
+module cache {
+    ls_enabled                   1
+    checkPrivateCache            1
+    checkPublicCache             1
+    maxCacheObjSize              10000000
+    maxStaleAge                  200
+    qsCache                      1
+    reqCookieCache               1
+    respCookieCache              1
+    ignoreReqCacheCtrl           1
+    ignoreRespCacheCtrl          0
+    enableCache                  0
+    expireInSeconds              3600
+    enablePrivateCache           0
+    privateExpireInSeconds       3600
+}
+{{ range .Sites }}
+virtualHost {{ .Name }} {
+    vhRoot                       {{ .Site.VhostRoot }}
+    allowSymbolLink              1
+    enableScript                 1
+    restrained                   1
+    setUIDMode                   0
+    chrootMode                   0
+    configFile                   {{ .ConfigFileRel }}
+}
+{{ end }}
+listener opanel_http {
+    address                      *:{{ .Config.HTTPPort }}
+    secure                       0
+{{- range .Sites }}
+    map                          {{ .Name }} {{ .MapDomains }}
+{{- end }}
+}
+{{ if .HasSSL }}
+listener opanel_https {
+    address                      *:{{ .Config.HTTPSPort }}
+    secure                       1
+    keyFile                      {{ .DefaultKeyFile }}
+    certFile                     {{ .DefaultCertFile }}
+    sslProtocol                  24
+    ciphers                      ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
+    enableECDHE                  1
+    renegProtection              1
+    sslSessionCache              1
+    enableSpdy                   15
+    enableQuic                   1
+{{- range .SSLSites }}
+    map                          {{ .Name }} {{ .MapDomains }}
+{{- end }}
+}
+{{ end }}

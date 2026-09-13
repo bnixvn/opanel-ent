@@ -1,0 +1,160 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// Site is a website row. See migration 00002 for why this table is the sole
+// source of truth for webserver configuration.
+type Site struct {
+	ID           int64
+	Domain       string
+	OwnerID      int64
+	AppType      string
+	PHPVersion   string
+	DocumentRoot string
+	Aliases      []string
+	RewriteMode  string
+	SSLEnabled   bool
+	WAFEnabled   bool
+	Suspended    bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+
+	// OwnerUsername is filled by queries that join users. It is not stored.
+	OwnerUsername string
+}
+
+const siteCols = `s.id, s.domain, s.owner_id, s.app_type, s.php_version, s.document_root,
+	s.aliases, s.rewrite_mode, s.ssl_enabled, s.waf_enabled, s.suspended,
+	s.created_at, s.updated_at, u.username`
+
+func scanSite(row interface{ Scan(...any) error }) (*Site, error) {
+	var s Site
+	var aliases, created, updated string
+	err := row.Scan(&s.ID, &s.Domain, &s.OwnerID, &s.AppType, &s.PHPVersion, &s.DocumentRoot,
+		&aliases, &s.RewriteMode, &s.SSLEnabled, &s.WAFEnabled, &s.Suspended,
+		&created, &updated, &s.OwnerUsername)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.Aliases = strings.Fields(aliases)
+	if s.CreatedAt, err = parseTime(created); err != nil {
+		return nil, fmt.Errorf("db: site %d created_at: %w", s.ID, err)
+	}
+	if s.UpdatedAt, err = parseTime(updated); err != nil {
+		return nil, fmt.Errorf("db: site %d updated_at: %w", s.ID, err)
+	}
+	return &s, nil
+}
+
+const siteJoin = ` FROM sites s JOIN users u ON u.id = s.owner_id`
+
+// CreateSite inserts a site and returns it as stored.
+func (d *DB) CreateSite(ctx context.Context, s *Site) (*Site, error) {
+	now := time.Now().UTC()
+	res, err := d.ExecContext(ctx,
+		`INSERT INTO sites (domain, owner_id, app_type, php_version, document_root,
+			aliases, rewrite_mode, ssl_enabled, waf_enabled, suspended, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		s.Domain, s.OwnerID, s.AppType, s.PHPVersion, s.DocumentRoot,
+		strings.Join(s.Aliases, " "), s.RewriteMode, s.SSLEnabled, s.WAFEnabled,
+		s.Suspended, fmtTime(now), fmtTime(now))
+	if err != nil {
+		return nil, fmt.Errorf("db: create site %q: %w", s.Domain, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return d.SiteByID(ctx, id)
+}
+
+// SiteByID looks a site up by primary key.
+func (d *DB) SiteByID(ctx context.Context, id int64) (*Site, error) {
+	return scanSite(d.QueryRowContext(ctx, `SELECT `+siteCols+siteJoin+` WHERE s.id = ?`, id))
+}
+
+// SiteByDomain looks a site up by its primary domain.
+func (d *DB) SiteByDomain(ctx context.Context, domain string) (*Site, error) {
+	return scanSite(d.QueryRowContext(ctx, `SELECT `+siteCols+siteJoin+` WHERE s.domain = ?`, domain))
+}
+
+// ListSites returns sites ordered by domain. An ownerID of 0 means every
+// owner; any other value restricts the result to that owner.
+func (d *DB) ListSites(ctx context.Context, ownerID int64) ([]*Site, error) {
+	q := `SELECT ` + siteCols + siteJoin
+	var args []any
+	if ownerID != 0 {
+		q += ` WHERE s.owner_id = ?`
+		args = append(args, ownerID)
+	}
+	q += ` ORDER BY s.domain`
+
+	rows, err := d.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]*Site, 0, 8)
+	for rows.Next() {
+		s, err := scanSite(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// UpdateSite writes the mutable fields of a site.
+func (d *DB) UpdateSite(ctx context.Context, s *Site) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE sites SET app_type = ?, php_version = ?, document_root = ?, aliases = ?,
+			rewrite_mode = ?, ssl_enabled = ?, waf_enabled = ?, suspended = ?, updated_at = ?
+		 WHERE id = ?`,
+		s.AppType, s.PHPVersion, s.DocumentRoot, strings.Join(s.Aliases, " "),
+		s.RewriteMode, s.SSLEnabled, s.WAFEnabled, s.Suspended, fmtTime(time.Now()), s.ID)
+	return err
+}
+
+// DeleteSite removes a site row. Files and webserver config are the caller's
+// responsibility; this only drops the record.
+func (d *DB) DeleteSite(ctx context.Context, id int64) error {
+	_, err := d.ExecContext(ctx, `DELETE FROM sites WHERE id = ?`, id)
+	return err
+}
+
+// CountSitesByOwner reports how many sites a user owns, for plan limits.
+func (d *DB) CountSitesByOwner(ctx context.Context, ownerID int64) (int, error) {
+	var n int
+	err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM sites WHERE owner_id = ?`, ownerID).Scan(&n)
+	return n, err
+}
+
+// SetUserLinuxAccount records the provisioned Linux account for a panel user.
+func (d *DB) SetUserLinuxAccount(ctx context.Context, userID, uid int64, home string) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE users SET linux_uid = ?, linux_home = ?, updated_at = ? WHERE id = ?`,
+		uid, home, fmtTime(time.Now()), userID)
+	return err
+}
+
+// UserLinuxHome returns the recorded home directory for a panel user.
+func (d *DB) UserLinuxHome(ctx context.Context, userID int64) (string, error) {
+	var home string
+	err := d.QueryRowContext(ctx, `SELECT linux_home FROM users WHERE id = ?`, userID).Scan(&home)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return home, err
+}

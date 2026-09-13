@@ -47,12 +47,12 @@ func Register[In, Out any](r *Registry, name string, version int, fn func(contex
 				dec := json.NewDecoder(bytes.NewReader(raw))
 				dec.DisallowUnknownFields() // a typo in a field name must fail, not be ignored
 				if err := dec.Decode(&in); err != nil {
-					return nil, &PayloadError{err: err}
+					return nil, &PayloadError{Err: err}
 				}
 			}
 			if v, ok := any(&in).(Validator); ok {
 				if err := v.Validate(); err != nil {
-					return nil, &PayloadError{err: err}
+					return nil, &PayloadError{Err: err}
 				}
 			}
 			return fn(ctx, in)
@@ -68,10 +68,10 @@ type Validator interface {
 
 // PayloadError marks a caller-side input problem so the server can answer
 // with CodeBadPayload rather than CodeInternal.
-type PayloadError struct{ err error }
+type PayloadError struct{ Err error }
 
-func (e *PayloadError) Error() string { return "invalid payload: " + e.err.Error() }
-func (e *PayloadError) Unwrap() error { return e.err }
+func (e *PayloadError) Error() string { return "invalid payload: " + e.Err.Error() }
+func (e *PayloadError) Unwrap() error { return e.Err }
 
 // DeniedError marks a refusal by policy rather than a failure.
 type DeniedError struct{ Reason string }

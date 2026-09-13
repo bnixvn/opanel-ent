@@ -20,7 +20,10 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
+	"github.com/bnixvn/opanel-ent/internal/platform/distro"
 	"github.com/bnixvn/opanel-ent/internal/version"
+	"github.com/bnixvn/opanel-ent/internal/webserver/ols"
 )
 
 func main() {
@@ -70,8 +73,20 @@ func run(log *slog.Logger, socketPath, apiUser, socketGroup, extraUIDs string) e
 		}
 	}
 
+	// The concrete backend and PHP provider are chosen here, at the one place
+	// that knows the host. Stage B swaps these two lines for LiteSpeed
+	// Enterprise and CloudLinux alt-php; no action handler changes.
+	ws, err := ols.New()
+	if err != nil {
+		return err
+	}
+	info := distro.Detect(context.Background())
+
 	registry := agent.NewRegistry()
-	actions.RegisterAll(registry)
+	actions.RegisterAll(registry, actions.Deps{
+		Webserver: ws,
+		PHP:       phpmgr.Detect(info.CloudLinux),
+	})
 
 	srv, err := agent.NewServer(agent.ServerOptions{
 		Registry:    registry,

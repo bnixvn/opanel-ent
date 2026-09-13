@@ -13,6 +13,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/sites"
 )
 
 // Server holds the dependencies every handler needs.
@@ -21,6 +22,7 @@ type Server struct {
 	db    *db.DB
 	auth  *auth.Service
 	agent *agentclient.Client
+	sites *sites.Service
 	log   *slog.Logger
 
 	loginLimiter *limiter
@@ -28,7 +30,7 @@ type Server struct {
 }
 
 // New builds the API server and its route table.
-func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, log *slog.Logger) *Server {
+func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -37,6 +39,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		db:    database,
 		auth:  authSvc,
 		agent: ac,
+		sites: siteSvc,
 		log:   log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -67,12 +70,28 @@ func (s *Server) routes() http.Handler {
 			pr.Post("/auth/logout", s.handleLogout)
 			pr.Get("/auth/me", s.handleMe)
 
+			// Sites. Ownership is enforced per request inside the handlers,
+			// so an end user reaches the same routes and sees only their own.
+			pr.Get("/sites", s.handleSiteList)
+			pr.Post("/sites", s.handleSiteCreate)
+			pr.Get("/sites/{id}", s.handleSiteGet)
+			pr.Patch("/sites/{id}", s.handleSiteUpdate)
+			pr.Delete("/sites/{id}", s.handleSiteDelete)
+
+			// Choosing a PHP version needs the list, so any authenticated
+			// user may read it; changing what is installed does not.
+			pr.Get("/php/versions", s.handlePHPList)
+			pr.Get("/webserver/status", s.handleWebserverStatus)
+
 			pr.Group(func(ar chi.Router) {
 				ar.Use(s.requireRole(auth.RoleAdmin))
 				ar.Get("/system/info", s.handleSystemInfo)
 				ar.Get("/system/services", s.handleServiceList)
 				ar.Post("/system/services/{unit}/{action}", s.handleServiceAction)
 				ar.Get("/system/audit", s.handleAuditList)
+				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
+				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
+				ar.Post("/webserver/sync", s.handleWebserverSync)
 			})
 		})
 	})

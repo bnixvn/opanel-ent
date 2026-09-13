@@ -16,6 +16,8 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
+	"github.com/bnixvn/opanel-ent/internal/sites"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
 
 type fixture struct {
@@ -51,7 +53,8 @@ func newFixture(t *testing.T) *fixture {
 	// cleanly rather than hang or panic when the agent is down.
 	ac := agentclient.New(filepath.Join(t.TempDir(), "absent.sock"), 2*time.Second)
 
-	api := httpapi.New(cfg, database, authSvc, ac, discardLogger())
+	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), discardLogger())
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, discardLogger())
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
 

@@ -1,0 +1,413 @@
+// Package sites orchestrates website lifecycle across the database, the
+// Linux filesystem and the webserver.
+//
+// It runs inside opanel-api and holds no privilege of its own: every step
+// that touches the host is an agent action. The ordering here is what makes
+// the operations safe to retry.
+package sites
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"path"
+	"slices"
+	"strings"
+
+	"github.com/bnixvn/opanel-ent/internal/agent/actions"
+	"github.com/bnixvn/opanel-ent/internal/agentclient"
+	"github.com/bnixvn/opanel-ent/internal/auth"
+	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
+	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
+)
+
+// Service manages websites.
+type Service struct {
+	db    *db.DB
+	agent *agentclient.Client
+	log   *slog.Logger
+	cfg   webserver.ServerConfig
+}
+
+// New builds a Service.
+func New(database *db.DB, ac *agentclient.Client, cfg webserver.ServerConfig, log *slog.Logger) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{db: database, agent: ac, log: log, cfg: cfg}
+}
+
+// Errors callers are expected to branch on.
+var (
+	ErrDomainTaken   = errors.New("sites: domain already exists")
+	ErrOwnerNotFound = errors.New("sites: owner does not exist")
+	ErrPHPNotReady   = errors.New("sites: requested PHP version is not installed")
+)
+
+// CreateRequest describes a new site.
+type CreateRequest struct {
+	Domain      string
+	Aliases     []string
+	OwnerID     int64
+	AppType     string
+	PHPVersion  string
+	RewriteMode string
+}
+
+// Normalise trims and lowercases hostnames and fills in defaults, so the same
+// site described two ways produces one record.
+func (r *CreateRequest) Normalise() {
+	r.Domain = strings.ToLower(strings.TrimSpace(r.Domain))
+	for i := range r.Aliases {
+		r.Aliases[i] = strings.ToLower(strings.TrimSpace(r.Aliases[i]))
+	}
+	r.Aliases = slices.Compact(slices.Sorted(slices.Values(r.Aliases)))
+	r.Aliases = slices.DeleteFunc(r.Aliases, func(a string) bool { return a == "" || a == r.Domain })
+	if r.RewriteMode == "" {
+		r.RewriteMode = webserver.RewriteNone
+	}
+	if r.AppType == webserver.AppStatic {
+		r.PHPVersion = ""
+	}
+}
+
+// Validate checks a request without touching the database.
+func (r CreateRequest) Validate() error {
+	if !webserver.ValidDomain(r.Domain) {
+		return fmt.Errorf("domain %q is not a valid hostname", r.Domain)
+	}
+	for _, a := range r.Aliases {
+		if !webserver.ValidDomain(a) {
+			return fmt.Errorf("alias %q is not a valid hostname", a)
+		}
+	}
+	if !slices.Contains(webserver.AppTypes, r.AppType) {
+		return fmt.Errorf("app type %q is not one of %v", r.AppType, webserver.AppTypes)
+	}
+	if !slices.Contains(webserver.RewriteModes, r.RewriteMode) {
+		return fmt.Errorf("rewrite mode %q is not one of %v", r.RewriteMode, webserver.RewriteModes)
+	}
+	needsPHP := r.AppType == webserver.AppPHP || r.AppType == webserver.AppWordPress
+	if needsPHP && !phpmgr.ValidVersion(r.PHPVersion) {
+		return fmt.Errorf("a %s site needs a PHP version", r.AppType)
+	}
+	return nil
+}
+
+// Create provisions a site.
+//
+// Order matters and is chosen so a failure at any step leaves something an
+// operator can retry rather than a half-built site:
+//
+//  1. the Linux account, which is idempotent;
+//  2. the site row, which is what makes the domain unique;
+//  3. the directory tree, also idempotent;
+//  4. the webserver configuration, rendered from the database in full.
+//
+// If step 4 fails the row is removed again, because a site that exists in the
+// database but is not served is the one state that would confuse everything
+// downstream.
+func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Site, error) {
+	req.Normalise()
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	owner, err := s.db.UserByID(ctx, req.OwnerID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, ErrOwnerNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.SiteByDomain(ctx, req.Domain); err == nil {
+		return nil, ErrDomainTaken
+	} else if !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+	if err := s.checkHostnamesFree(ctx, req.Domain, req.Aliases, 0); err != nil {
+		return nil, err
+	}
+	if req.PHPVersion != "" {
+		if err := s.requirePHP(ctx, req.PHPVersion); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.EnsureAccount(ctx, owner); err != nil {
+		return nil, err
+	}
+
+	vhostRoot := path.Join(linuxuser.Home(owner.Username), req.Domain)
+	site, err := s.db.CreateSite(ctx, &db.Site{
+		Domain:       req.Domain,
+		OwnerID:      owner.ID,
+		AppType:      req.AppType,
+		PHPVersion:   req.PHPVersion,
+		DocumentRoot: path.Join(vhostRoot, "public_html"),
+		Aliases:      req.Aliases,
+		RewriteMode:  req.RewriteMode,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := agentclient.Call[struct{}](ctx, s.agent, "site.provision", 1,
+		actions.SiteProvisionRequest{
+			Domain:       site.Domain,
+			Owner:        owner.Username,
+			VhostRoot:    vhostRoot,
+			DocumentRoot: site.DocumentRoot,
+			AppType:      site.AppType,
+		}); err != nil {
+		s.rollbackRow(ctx, site.ID, "provision")
+		return nil, fmt.Errorf("provision files: %w", err)
+	}
+
+	if err := s.SyncWebserver(ctx); err != nil {
+		s.rollbackRow(ctx, site.ID, "webserver")
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	return site, nil
+}
+
+// rollbackRow undoes the database half of a failed create. The files are left
+// in place deliberately: they are harmless, and deleting a directory tree
+// after a partial failure risks removing data the next attempt would reuse.
+func (s *Service) rollbackRow(ctx context.Context, id int64, stage string) {
+	if err := s.db.DeleteSite(ctx, id); err != nil {
+		s.log.Error("sites: could not roll back site row after failed "+stage,
+			"site_id", id, "err", err)
+	}
+}
+
+// Delete removes a site. Files are removed only when asked.
+func (s *Service) Delete(ctx context.Context, id int64, removeFiles bool) error {
+	site, err := s.db.SiteByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.db.DeleteSite(ctx, id); err != nil {
+		return err
+	}
+	// The configuration goes before the files: a site whose files are gone
+	// but whose vhost still points at them serves confusing errors. If the
+	// apply fails, put the row back rather than leaving a site that the
+	// database has forgotten but the webserver is still serving.
+	if err := s.SyncWebserver(ctx); err != nil {
+		if _, rerr := s.db.CreateSite(ctx, site); rerr != nil {
+			s.log.Error("sites: could not restore site row after a failed apply",
+				"domain", site.Domain, "err", rerr)
+		}
+		return fmt.Errorf("apply webserver config: %w", err)
+	}
+	if removeFiles {
+		if _, err := agentclient.Call[struct{}](ctx, s.agent, "site.remove", 1,
+			actions.SiteRemoveRequest{
+				Domain:    site.Domain,
+				Owner:     site.OwnerUsername,
+				VhostRoot: path.Dir(site.DocumentRoot),
+			}); err != nil {
+			return fmt.Errorf("remove files: %w", err)
+		}
+	}
+	return nil
+}
+
+// UpdateRequest carries the fields a caller may change. A nil pointer means
+// "leave alone", which keeps a partial update from clearing a field.
+type UpdateRequest struct {
+	AppType     *string
+	PHPVersion  *string
+	Aliases     *[]string
+	RewriteMode *string
+	Suspended   *bool
+	WAFEnabled  *bool
+}
+
+// Update changes a site and re-applies the configuration.
+func (s *Service) Update(ctx context.Context, id int64, req UpdateRequest) (*db.Site, error) {
+	site, err := s.db.SiteByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.AppType != nil {
+		if !slices.Contains(webserver.AppTypes, *req.AppType) {
+			return nil, fmt.Errorf("app type %q is not one of %v", *req.AppType, webserver.AppTypes)
+		}
+		site.AppType = *req.AppType
+	}
+	if req.PHPVersion != nil {
+		site.PHPVersion = *req.PHPVersion
+	}
+	// Switching to static clears the version; switching away from it needs one.
+	if site.AppType == webserver.AppStatic {
+		site.PHPVersion = ""
+	} else if !phpmgr.ValidVersion(site.PHPVersion) {
+		return nil, fmt.Errorf("a %s site needs a PHP version", site.AppType)
+	}
+	if site.PHPVersion != "" {
+		if err := s.requirePHP(ctx, site.PHPVersion); err != nil {
+			return nil, err
+		}
+	}
+	if req.Aliases != nil {
+		aliases := make([]string, 0, len(*req.Aliases))
+		for _, a := range *req.Aliases {
+			a = strings.ToLower(strings.TrimSpace(a))
+			if a == "" || a == site.Domain {
+				continue
+			}
+			if !webserver.ValidDomain(a) {
+				return nil, fmt.Errorf("alias %q is not a valid hostname", a)
+			}
+			aliases = append(aliases, a)
+		}
+		aliases = slices.Compact(slices.Sorted(slices.Values(aliases)))
+		if err := s.checkHostnamesFree(ctx, site.Domain, aliases, site.ID); err != nil {
+			return nil, err
+		}
+		site.Aliases = aliases
+	}
+	if req.RewriteMode != nil {
+		if !slices.Contains(webserver.RewriteModes, *req.RewriteMode) {
+			return nil, fmt.Errorf("rewrite mode %q is not one of %v", *req.RewriteMode, webserver.RewriteModes)
+		}
+		site.RewriteMode = *req.RewriteMode
+	}
+	if req.Suspended != nil {
+		site.Suspended = *req.Suspended
+	}
+	if req.WAFEnabled != nil {
+		site.WAFEnabled = *req.WAFEnabled
+	}
+
+	// Keep the row as it was, so a failed apply can put it back. Without
+	// this the database would claim a change that the served configuration
+	// never received -- the two would stay apart until some later, unrelated
+	// sync happened to push it through.
+	previous, err := s.db.SiteByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.db.UpdateSite(ctx, site); err != nil {
+		return nil, err
+	}
+	if err := s.SyncWebserver(ctx); err != nil {
+		if rerr := s.db.UpdateSite(ctx, previous); rerr != nil {
+			s.log.Error("sites: could not restore site row after a failed apply",
+				"site_id", id, "err", rerr)
+		}
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	return s.db.SiteByID(ctx, id)
+}
+
+// SyncWebserver regenerates the whole webserver configuration from the
+// database. Every mutation ends here, which is what guarantees the rendered
+// configuration and the database never drift apart.
+func (s *Service) SyncWebserver(ctx context.Context) error {
+	rows, err := s.db.ListSites(ctx, 0)
+	if err != nil {
+		return err
+	}
+	specs := make([]actions.SiteSpec, 0, len(rows))
+	for _, r := range rows {
+		specs = append(specs, actions.SiteSpec{
+			Domain:       r.Domain,
+			Aliases:      r.Aliases,
+			Owner:        r.OwnerUsername,
+			VhostRoot:    path.Dir(r.DocumentRoot),
+			DocumentRoot: r.DocumentRoot,
+			AppType:      r.AppType,
+			PHPVersion:   r.PHPVersion,
+			RewriteMode:  r.RewriteMode,
+			SSLEnabled:   r.SSLEnabled,
+			WAFEnabled:   r.WAFEnabled,
+			Suspended:    r.Suspended,
+		})
+	}
+	_, err = agentclient.Call[struct{}](ctx, s.agent, "webserver.apply", 1,
+		actions.WebserverApplyRequest{Config: s.cfg, Sites: specs})
+	return err
+}
+
+// EnsureAccount makes sure a panel user has its Linux account. It is safe to
+// call repeatedly; the agent action is itself idempotent.
+func (s *Service) EnsureAccount(ctx context.Context, u *db.User) error {
+	if u.LinuxUID != nil && *u.LinuxUID > 0 {
+		return nil
+	}
+	acct, err := agentclient.Call[linuxuser.Account](ctx, s.agent, "linuxuser.create", 1,
+		actions.AccountRequest{Username: u.Username})
+	if err != nil {
+		return fmt.Errorf("create Linux account for %q: %w", u.Username, err)
+	}
+	return s.db.SetUserLinuxAccount(ctx, u.ID, acct.UID, acct.Home)
+}
+
+// SetSFTPPassword sets the owner's SFTP password.
+func (s *Service) SetSFTPPassword(ctx context.Context, u *db.User, password string) error {
+	if err := s.EnsureAccount(ctx, u); err != nil {
+		return err
+	}
+	_, err := agentclient.Call[struct{}](ctx, s.agent, "linuxuser.set_password", 1,
+		actions.AccountPasswordRequest{Username: u.Username, Password: password})
+	return err
+}
+
+// checkHostnamesFree rejects a hostname already claimed by another site. The
+// renderer would catch this too, but failing here names the request that is
+// wrong instead of failing every later apply.
+func (s *Service) checkHostnamesFree(ctx context.Context, domain string, aliases []string, exceptID int64) error {
+	rows, err := s.db.ListSites(ctx, 0)
+	if err != nil {
+		return err
+	}
+	taken := make(map[string]string)
+	for _, r := range rows {
+		if r.ID == exceptID {
+			continue
+		}
+		for _, h := range append([]string{r.Domain}, r.Aliases...) {
+			taken[h] = r.Domain
+		}
+	}
+	for _, h := range append([]string{domain}, aliases...) {
+		if owner, dup := taken[h]; dup {
+			return fmt.Errorf("%w: %q is already served by %q", ErrDomainTaken, h, owner)
+		}
+	}
+	return nil
+}
+
+// requirePHP fails when the version is not installed, rather than letting the
+// webserver start an interpreter that is not there and return 503 to visitors.
+func (s *Service) requirePHP(ctx context.Context, version string) error {
+	res, err := agentclient.Call[actions.PHPListResult](ctx, s.agent, "php.list", 1, struct{}{})
+	if err != nil {
+		return err
+	}
+	for _, v := range res.Versions {
+		if v.Version == version {
+			if v.Installed {
+				return nil
+			}
+			return fmt.Errorf("%w: PHP %s (install it first)", ErrPHPNotReady, version)
+		}
+	}
+	return fmt.Errorf("%w: PHP %s is not offered by provider %q", ErrPHPNotReady, version, res.Provider)
+}
+
+// VisibleTo restricts a listing to what a role may see: administrators and
+// resellers see everything, an end user only their own sites.
+func VisibleTo(u *db.User) int64 {
+	if auth.Role(u.Role).AtLeast(auth.RoleReseller) {
+		return 0
+	}
+	return u.ID
+}

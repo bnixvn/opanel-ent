@@ -9,15 +9,27 @@ import (
 	"os"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/distro"
 	"github.com/bnixvn/opanel-ent/internal/version"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
 
+// Deps are the pluggable pieces the agent works through. Injecting them
+// rather than constructing them here is what lets the same action set drive
+// OpenLiteSpeed today and LiteSpeed Enterprise later, and lsphp today and
+// CloudLinux alt-php later, with no change to any handler.
+type Deps struct {
+	Webserver webserver.Backend
+	PHP       phpmgr.Provider
+}
+
 // RegisterAll wires every action into r.
-func RegisterAll(r *agent.Registry) {
+func RegisterAll(r *agent.Registry, deps Deps) {
 	registerCore(r)
 	registerSystemd(r)
 	registerPackages(r)
+	registerSites(r, deps)
 }
 
 // PingResult is the reply to "ping".

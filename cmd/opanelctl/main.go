@@ -21,6 +21,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
 )
 
@@ -36,6 +37,8 @@ Usage:
   opanelctl agent sysinfo               print detected host information
   opanelctl service list                list managed systemd units
   opanelctl user create-admin <name>    create an administrator
+  opanelctl user create <name> <role>   create a user (admin|reseller|end_user)
+  opanelctl user list                   list panel users
 
 Environment: OPANEL_DB_PATH, OPANEL_AGENT_SOCKET, OPANEL_DATA_DIR
 `
@@ -264,12 +267,78 @@ func cmdService(ctx context.Context, args []string) error {
 }
 
 func cmdUser(ctx context.Context, args []string) error {
-	if len(args) < 2 || args[0] != "create-admin" {
-		return errors.New("user: want 'create-admin <username>'")
+	if len(args) == 0 {
+		return errors.New("user: want 'create-admin', 'create' or 'list'")
 	}
-	username := strings.TrimSpace(args[1])
+	switch args[0] {
+	case "create-admin":
+		if len(args) < 2 {
+			return errors.New("user: want 'create-admin <username>'")
+		}
+		return createUser(ctx, args[1], auth.RoleAdmin)
+	case "create":
+		if len(args) < 3 {
+			return errors.New("user: want 'create <username> <admin|reseller|end_user>'")
+		}
+		role := auth.Role(args[2])
+		if !role.Valid() {
+			return fmt.Errorf("user: %q is not a valid role", args[2])
+		}
+		return createUser(ctx, args[1], role)
+	case "list":
+		return listUsers(ctx)
+	default:
+		return fmt.Errorf("user: unknown subcommand %q", args[0])
+	}
+}
+
+func listUsers(ctx context.Context) error {
+	_, database, err := openDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+
+	rows, err := database.QueryContext(ctx,
+		`SELECT id, username, role, linux_uid, suspended FROM users ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tUSERNAME\tROLE\tLINUX UID\tSUSPENDED")
+	for rows.Next() {
+		var id int64
+		var username, role string
+		var uid *int64
+		var suspended bool
+		if err := rows.Scan(&id, &username, &role, &uid, &suspended); err != nil {
+			return err
+		}
+		linux := "-"
+		if uid != nil {
+			linux = fmt.Sprint(*uid)
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%v\n", id, username, role, linux, suspended)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return tw.Flush()
+}
+
+func createUser(ctx context.Context, username string, role auth.Role) error {
+	username = strings.TrimSpace(username)
 	if username == "" {
 		return errors.New("user: username must not be empty")
+	}
+	// An end user gets a Linux account named after them the first time they
+	// own a site, so the name has to be acceptable to useradd from the start.
+	if role == auth.RoleEndUser && !linuxuser.ValidName(username) {
+		return fmt.Errorf("user: %q cannot be a Linux account name: 3-32 characters, "+
+			"starting with a letter, using lowercase letters, digits, _ and - only, "+
+			"and not a reserved system name", username)
 	}
 
 	_, database, err := openDB(ctx)
@@ -298,13 +367,13 @@ func cmdUser(ctx context.Context, args []string) error {
 	u, err := database.CreateUser(ctx, &db.User{
 		Username:     username,
 		PasswordHash: hash,
-		Role:         string(auth.RoleAdmin),
+		Role:         string(role),
 	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("created admin %q (id %d)\n", u.Username, u.ID)
+	fmt.Printf("created %s %q (id %d)\n", role, u.Username, u.ID)
 	fmt.Printf("password: %s\n", password[0])
 	fmt.Println("Store it now: it is not recoverable and will not be shown again.")
 	return nil
