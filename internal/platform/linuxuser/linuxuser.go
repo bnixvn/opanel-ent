@@ -127,10 +127,27 @@ func Create(ctx context.Context, username string) (*Account, error) {
 		return nil, fmt.Errorf("linuxuser: %q was not present after useradd", username)
 	}
 
-	// 0711 rather than 0750: the webserver's own worker runs as a different
-	// account and must be able to traverse into the site directory, but must
-	// not be able to list the home itself.
-	if err := os.Chmod(acct.Home, 0o711); err != nil {
+	// The home directory has to satisfy three parties at once:
+	//
+	//   sshd     ChrootDirectory requires every component to be owned by root
+	//            and writable by no one else, or it refuses the session with
+	//            "bad ownership or modes for chroot directory".
+	//   the      Its worker runs as its own account, not as the site owner, so
+	//   webserver it must be able to traverse in.
+	//   the user They must not be able to replace the directory that chroots
+	//            them, which is exactly what root ownership prevents.
+	//
+	// root:<user> 0751 satisfies all three. Root-owned with no group or other
+	// write keeps sshd happy; the group bit is r-x so the owner can still list
+	// their own home over SFTP, which 0711 refused with "permission denied" on
+	// the very first directory listing; other keeps --x so the webserver can
+	// traverse without reading. The user owns everything inside -- the site
+	// directories the panel creates and the skeleton files useradd left -- so
+	// they lose nothing but the ability to write in the home root itself.
+	if err := os.Chown(acct.Home, 0, int(acct.GID)); err != nil {
+		return nil, fmt.Errorf("linuxuser: chown home: %w", err)
+	}
+	if err := os.Chmod(acct.Home, 0o751); err != nil {
 		return nil, fmt.Errorf("linuxuser: chmod home: %w", err)
 	}
 	return acct, nil

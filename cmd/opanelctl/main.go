@@ -21,6 +21,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/installer"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
 )
@@ -28,6 +29,7 @@ import (
 const usage = `opanelctl -- OPanel operator CLI
 
 Usage:
+  opanelctl install [flags]             install the panel on this host
   opanelctl version                     print build version
   opanelctl doctor                      check database and agent health
   opanelctl db version                  print the applied schema version
@@ -66,6 +68,8 @@ func dispatch(ctx context.Context, args []string) error {
 	case "version":
 		fmt.Println("opanelctl", version.String())
 		return nil
+	case "install":
+		return cmdInstall(ctx, args[1:])
 	case "doctor":
 		return cmdDoctor(ctx)
 	case "db":
@@ -79,6 +83,71 @@ func dispatch(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q (try: opanelctl -h)", args[0])
 	}
+}
+
+func cmdInstall(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	port := fs.Int("port", 2222, "port for the panel API")
+	admin := fs.String("admin", "admin", "name of the first administrator")
+	php := fs.String("php", "8.4,8.3", "comma-separated PHP versions to install")
+	binDir := fs.String("bin-dir", "", "directory holding the opanel binaries (default: alongside opanelctl)")
+	skipFW := fs.Bool("skip-firewall", false, "leave nftables alone")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := &installer.Options{
+		PanelPort:    *port,
+		AdminUser:    *admin,
+		BinDir:       *binDir,
+		SkipFirewall: *skipFW,
+		PHPVersions:  splitList(*php),
+	}
+	if _, err := installer.Run(ctx, opts); err != nil {
+		return err
+	}
+
+	// The first administrator is created after the services are up, so the
+	// credentials are the last thing printed and cannot scroll away behind
+	// package output.
+	cfg, database, err := openDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+
+	n, err := database.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Println()
+	if n == 0 {
+		if err := createUser(ctx, opts.AdminUser, auth.RoleAdmin); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("%d panel user(s) already exist; no administrator was created.\n", n)
+	}
+
+	fmt.Println()
+	fmt.Printf("Panel:  http://<server-ip>:%d\n", opts.PanelPort)
+	fmt.Printf("Config: %s/opanel.env\n", installer.ConfigDir)
+	fmt.Printf("Data:   %s\n", cfg.DataDir)
+	fmt.Println()
+	fmt.Println("The API listens on 127.0.0.1 by default. To reach it from outside, set")
+	fmt.Printf("OPANEL_LISTEN=0.0.0.0:%d in %s/opanel.env and restart opanel-api,\n", opts.PanelPort, installer.ConfigDir)
+	fmt.Println("and make sure your provider's firewall allows 80, 443 and that port.")
+	return nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func loadConfig() (*config.Config, error) {
