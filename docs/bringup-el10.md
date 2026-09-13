@@ -254,23 +254,29 @@ XFS không bật được quota bằng remount; với root filesystem phải th�
 | 8 | `valkey-cli` thay `redis-cli` | Phase 3 |
 | 9 | Quyết định quota mềm vs `rootflags=uquota` + reboot | Phase 3 |
 | 10 | Installer báo cáo trạng thái SELinux thay vì giả định | Phase 2 |
+| 12 | Chỉ mở port 25 ở hạ tầng nếu chạy mail; 80/443/panel không cần | khi cần |
 | 11 | Bỏ toàn bộ code cài ionCube thủ công | Phase 2 |
 
-## 14b. ⚠ Provider có cloud firewall phía trên — chỉ mở 22
+## 14b. ~~Provider có cloud firewall~~ ❌ KẾT LUẬN SAI — đã bác bỏ 2026-09-14
 
-Bằng chứng: ở lần đo **đầu tiên**, khi máy chưa cài firewall nào và không có service nào nghe ở 80/443, hai cổng đó vẫn trả `timeout` thay vì `refused`. Không có bộ lọc phía trên thì kernel đã phải trả RST.
+**Ghi lại nguyên văn vì đây là một sai lầm suy luận đáng nhớ.**
 
-Đo lại sau khi dựng nftables (cho phép 22/80/443):
+Kết luận ban đầu: 80 và 443 bị nhà cung cấp chặn, dựa trên lập luận "cổng đóng mà không có firewall thì kernel phải trả RST, tức `refused`; ở đây ra `timeout` nên phải có bộ lọc phía trên".
 
-| Cổng | Kết quả từ ngoài | Diễn giải |
+**Lập luận đó sai.** Đo lại bằng listener đặt có chủ đích:
+
+| Cổng | Điều kiện | Kết quả |
 |---|---|---|
-| 22 | OPEN | ✅ |
-| 80, 443 | filtered | ❌ nftables cho qua, nhưng **cloud firewall chặn** |
-| 3306, 7080, 8088 | filtered | ✅ đúng ý đồ |
+| 443 | nft cho phép + có listener | **OPEN**, nhận đúng dữ liệu |
+| 9999 | nft **không** cho phép + có listener | drop — đúng, firewall VPS chặn |
+| 2222 | nft cho phép, listener chỉ bind `127.0.0.1` | timeout |
+| 80 | nft cho phép + OLS đã nghe | **OPEN** |
 
-**Việc cần làm trước Phase 2:** mở **80** và **443** trong panel nhà cung cấp, cộng với **cổng panel** (mặc định dự kiến 2222). Không mở thì không test được website nào, và không cấp được SSL Let's Encrypt qua HTTP-01.
+Hạ tầng chỉ chặn **port 25**. Cả hai cổng tưởng bị chặn đều đơn giản là **không có gì đang nghe**: 443 chưa có listener vì chưa site nào bật SSL (renderer chỉ sinh listener HTTPS khi có site SSL), 2222 thì API bind loopback.
 
-Không mở 7080/8088 ra Internet — WebAdmin của OLS truy cập qua SSH tunnel khi cần.
+Bài học: `timeout` thay vì `refused` **không** đủ để kết luận có bộ lọc phía trên. Cách đo đúng là đặt một listener rồi thử lại — một thí nghiệm mất hai phút, đáng lẽ phải làm trước khi kết luận.
+
+Việc cần làm rút xuống còn: mở **port 25** nếu sau này chạy mail. Không cần đụng gì cho 80/443/2222.
 
 ## 15. Firewall đã dựng (2026-09-14)
 
