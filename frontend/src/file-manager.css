@@ -1,0 +1,709 @@
+.file-manager {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.file-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  min-width: 0;
+  box-shadow: none;
+}
+
+.file-panel {
+  display: grid;
+  gap: 0;
+}
+
+.file-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: start;
+}
+
+.compact-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.compact-actions button {
+  padding: 9px 10px;
+}
+
+.file-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.file-toolbar select {
+  width: auto;
+  min-width: 84px;
+}
+
+.file-toolbar button,
+.file-toolbar .upload-button,
+.file-toolbar select {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.file-job-list {
+  display: grid;
+  gap: 5px;
+  grid-column: 1 / -1;
+}
+
+.file-job {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.file-job svg {
+  flex: none;
+  color: var(--primary-ink);
+}
+
+.file-job span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-job small {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.file-job.done {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.file-job.error {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.path-pill {
+  margin: 0;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.breadcrumb-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  grid-column: 1 / -1;
+  border-radius: var(--radius-sm);
+}
+
+.crumb {
+  min-height: 26px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.crumb:hover:not(:disabled) {
+  background: var(--primary-light);
+  border-color: var(--border-hover);
+  color: var(--brand-ink);
+}
+
+.crumb:disabled {
+  background: var(--primary-light);
+  border-color: var(--primary-soft);
+  color: var(--primary-ink);
+  opacity: 1;
+}
+
+.file-controls .file-meta {
+  min-height: 34px;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  background: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--text-secondary);
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.file-controls .file-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-controls .file-meta strong {
+  color: var(--text);
+}
+
+.file-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.file-list-header label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-list-header input,
+.file-item > input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.file-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  max-height: min(68vh, 760px);
+  overflow: auto;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: 20px minmax(240px, 1fr) 52px 82px auto;
+  gap: 8px;
+  align-items: center;
+  background: var(--surface);
+  color: var(--text);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  min-height: 36px;
+  padding: 4px 8px;
+  justify-content: stretch;
+  text-align: left;
+  transition: var(--transition);
+}
+
+.file-item:last-child {
+  border-bottom: 0;
+}
+
+.file-item:hover {
+  background: var(--surface-hover);
+}
+
+.file-item.selected {
+  /* Stronger than --surface-hover so a selected row still reads as selected
+     while the pointer is over it. */
+  background: var(--primary-light);
+}
+
+.file-list button.file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: unset;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  color: var(--text) !important;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  justify-content: flex-start;
+  box-shadow: none;
+}
+
+.file-list button.file-name:hover {
+  background: transparent !important;
+  color: var(--primary-ink) !important;
+}
+
+.file-list button.file-name:focus,
+.file-list button.file-name:active {
+  background: transparent !important;
+  color: var(--primary-ink) !important;
+  box-shadow: none !important;
+}
+
+.file-list button.file-name strong {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-list button.file-name svg {
+  color: var(--primary-ink);
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+
+.file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.file-mode {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.file-delete {
+  color: var(--danger);
+}
+
+.file-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.file-row-actions .mini {
+  min-height: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+}
+
+.file-row-actions .mini.danger {
+  background: var(--surface);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  min-width: 26px;
+  width: 26px;
+  padding: 0;
+}
+
+.file-row-actions .mini.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.file-row-actions .mini:disabled {
+  height: 26px;
+  min-height: 26px;
+}
+
+.empty-box {
+  background: var(--surface);
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  padding: 20px;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* The editor fills its container — Ace takes the height from here and scrolls
+   the document itself through .ace_scrollbar-v/-h. Never give .ace_scroller an
+   overflow of its own: Ace renders only the visible rows, so a native scrollbar
+   there both doubles up with Ace's and desyncs the renderer from the row a
+   click lands on, which leaves the end of a long file uneditable. */
+.code-editor-host {
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Colours hang off .ace_editor (the class Ace adds to this host) so they
+   out-specify Ace's own theme class .ace-tomorrow-night — hardcoding light
+   values here is what used to leave the editor light in dark mode. Line height
+   belongs here too: Ace measures it off this element. */
+.code-editor-host.ace_editor {
+  background: var(--surface);
+  color: var(--text);
+  line-height: 22px;
+}
+
+.code-editor-host .ace_gutter {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+}
+
+.code-editor-host .ace_marker-layer .ace_active-line,
+.code-editor-host .ace_gutter-active-line {
+  background: var(--primary-light);
+}
+
+/* Selection sits behind the text layer, so it has to stay light enough to read
+   through — an opaque --primary here is what forced the old white-text overlay. */
+.code-editor-host .ace_marker-layer .ace_selection {
+  background: var(--primary-soft);
+}
+
+.code-editor-host .ace_marker-layer .ace_selected-word {
+  border: 1px solid var(--primary);
+}
+
+/* Search match highlighting for ext-searchbox */
+.code-editor-host .ace_search {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.code-editor-host .ace_search_field {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.code-editor-host .ace_searchbtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.code-editor-host .ace_searchbtn:hover {
+  color: var(--text);
+}
+.code-editor-host .ace_replace {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+/* Exactly one viewport tall, never more: the page must not scroll, only the
+   editor inside it. min-height overrides the global main{min-height:100vh},
+   which would otherwise re-add a page scrollbar wherever dvh < vh (mobile). */
+.standalone-editor-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.standalone-editor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  flex: 0 0 auto;
+}
+
+.standalone-editor-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.standalone-editor-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.standalone-editor-title span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.file-list .empty-box {
+  border: 0;
+  border-radius: 0;
+  padding: 28px 16px;
+}
+
+.standalone-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.standalone-editor-actions button {
+  height: 34px;
+  min-height: 34px;
+}
+
+.editor-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* The editor fills whatever is left under the toolbar; min-height:0 lets this
+   flex item shrink so the page itself never grows past 100vh and scrolls. */
+.standalone-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px;
+}
+
+@media (max-width: 1100px) {
+  .file-manager,
+  .file-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .file-list {
+    max-height: 360px;
+  }
+
+  .file-item {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 6px 8px;
+  }
+
+  .file-size,
+  .file-mode,
+  .file-row-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 760px) {
+  .file-manager {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .file-panel {
+    max-width: 100%;
+    overflow: hidden;
+    padding: 8px;
+  }
+
+  .file-controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .file-controls > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .file-controls select {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .file-controls .file-meta {
+    display: grid;
+    gap: 3px;
+    min-height: 0;
+    padding: 7px 8px;
+  }
+
+  .file-controls .file-meta span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
+  }
+
+  .path-pill.breadcrumb-line {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crumb {
+    flex: 0 0 auto;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-toolbar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .file-toolbar button,
+  .file-toolbar .upload-button,
+  .file-toolbar select {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .file-list-header {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .file-list {
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .file-item {
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 4px 8px;
+    min-height: 0;
+    padding: 8px;
+    align-items: start;
+  }
+
+  .file-item > input[type=checkbox] {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 4px;
+  }
+
+  .file-list button.file-name {
+    grid-column: 2;
+    grid-row: 1;
+    align-items: flex-start;
+    max-width: 100%;
+    min-height: 24px;
+    line-height: 1.35;
+  }
+
+  .file-list button.file-name strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+
+  .file-list button.file-name svg {
+    margin-top: 2px;
+  }
+
+  .file-size {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .file-mode {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .file-row-actions {
+    grid-column: 2;
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    width: 100%;
+  }
+
+  .file-row-actions .mini,
+  .file-row-actions .mini.danger {
+    height: 30px;
+    min-height: 30px;
+    overflow: hidden;
+    padding: 0 6px;
+    text-overflow: ellipsis;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .file-row-actions .mini.danger {
+    padding: 0;
+  }
+
+  .standalone-editor-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .standalone-editor-actions {
+    justify-content: flex-start;
+  }
+}

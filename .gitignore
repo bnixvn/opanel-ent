@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.kiro/
+
+# Build artifacts
+*.bak
+*.tar.gz
+backup/
+
+# BPanel runtime
+backend/bpanel.db
+
+# Landing page
+landing.html
+/style.css
+
+# Dev / CI / tooling (not part of release)
+.codex/
+.github/
+# ...except the CI workflows, which have to be committed to run at all.
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+.ruff_cache/
+.vendor/
+skills/
+prompts/
+
+# Scripts not part of setup
+check.py
+patch*.py
+do_patch.py
+fix_include.py
+remote_fix.py
+test_ssh.py
+setup.sh
+change_IP.sh
+
+# Test files
+backend/tests/
+
+# Misc
+images.zip
+
+# Codebase memory
+.codebase-memory/

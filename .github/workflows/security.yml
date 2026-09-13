@@ -1,0 +1,56 @@
+name: Security
+
+# Dependency CVE scanning. The scheduled run is the point of this workflow:
+# a pinned dependency does not change, but the advisories against it keep
+# arriving, so a push-only scan goes stale the moment the last commit lands.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-deps:
+    name: Python dependencies (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: backend/requirements.txt
+          # Accepted risk, re-review whenever this list is touched:
+          #
+          # GHSA-wj6h-64fc-37mp (CVE-2024-23342) -- Minerva timing attack on
+          # P-256 in python-ecdsa. No fixed version exists; upstream declined
+          # to fix and documents ecdsa as unsuitable for untrusted input.
+          # ecdsa reaches us only as a transitive dependency of python-jose,
+          # and opanel-ent signs its JWTs with HS256 (app/core/security.py), so
+          # no ECDSA code path is exercised. Removing it for good means
+          # dropping python-jose for PyJWT.
+          ignore-vulns: |
+            GHSA-wj6h-64fc-37mp
+
+  node-deps:
+    name: Frontend dependencies (npm audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm audit
+        run: npm audit --audit-level=high

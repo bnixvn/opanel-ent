@@ -1,0 +1,1028 @@
+#!/usr/bin/env bash
+# Update opanel-ent from GitHub.
+#
+# By default this script downloads the newest stable release zip to a temporary
+# directory, syncs the source into /opt/opanel-ent, rebuilds the frontend, refreshes
+# helper scripts, restarts the API, and reloads nginx for customer vhosts. A git
+# checkout is only used for --branch or --skip-pull development workflows.
+#
+# Usage:
+#   sudo bash installer/update.sh
+#   sudo bash installer/update.sh --branch main
+#   sudo bash installer/update.sh --tag v1.0.4
+#   sudo bash installer/update.sh --help
+
+set -euo pipefail
+
+log()  { echo ""; echo "==> $1"; }
+fail() { echo "ERROR: $1" >&2; exit 1; }
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  sudo bash installer/update.sh
+  sudo bash installer/update.sh --tag v1.0.4
+  sudo bash installer/update.sh --branch main
+
+Options:
+  --release          Update to the newest matching release tag.
+  --tag TAG          Pin an exact release tag.
+  --branch NAME      Update from a remote branch.
+  --channel MODE     Set update mode: release, tag, or branch.
+  --remote NAME      Git remote to fetch from or create on clone (default: origin).
+  --skip-pull        Sync the current SOURCE_DIR without fetching/checking out.
+  --app-dir DIR      Production deployment dir (default: /opt/opanel-ent).
+  -h, --help         Show this help.
+
+Environment:
+  APP_DIR, SOURCE_DIR, REPO_URL, GIT_REMOTE, UPDATE_CHANNEL, BRANCH,
+  RELEASE_TAG, RELEASE_PATTERN, RELEASE_ZIP_URL, SKIP_PULL.
+
+Notes:
+  The branch channel is the default and pulls GitHub main. The release channel
+  selects the newest matching release tag and downloads a zip archive. Use
+  --tag or UPDATE_CHANNEL=tag with RELEASE_TAG to pin a tag.
+  Use RELEASE_ZIP_URL with {tag} only for non-GitHub archive URLs.
+USAGE
+}
+
+require_arg() {
+  local opt="$1" value="${2-}"
+  [[ -n "$value" && "$value" != --* ]] || fail "$opt requires a value"
+}
+
+for arg in "$@"; do
+  if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+done
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Please run as root"
+  exit 1
+fi
+
+if [[ -z "${opanel_ent_UPDATE_STABLE_COPY:-}" ]]; then
+  _original_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  _stable_copy="$(mktemp /tmp/opanel-ent-update.XXXXXX.sh)"
+  cp "$_original_script" "$_stable_copy"
+  chmod 0700 "$_stable_copy"
+  opanel_ent_UPDATE_STABLE_COPY="$_stable_copy" \
+    opanel_ent_UPDATE_ORIGINAL_SCRIPT="$_original_script" \
+    exec /bin/bash "$_stable_copy" "$@"
+fi
+
+cleanup_stable_copy() {
+  rm -f "${opanel_ent_UPDATE_STABLE_COPY:-}" 2>/dev/null || true
+}
+trap cleanup_stable_copy EXIT
+
+# --- Config ----------------------------------------------------------------
+APP_DIR="${APP_DIR:-/opt/opanel-ent}"                 # Production deployment dir
+DEFAULT_SOURCE_DIR="/opt/opanel-ent-source"           # Dev/branch checkout dir only
+
+# Resolve where THIS script lives. If it's inside a real git checkout we use
+# that. Otherwise we fall back to /opt/opanel-ent-source so users running the
+# script from the deploy dir still get a usable workflow.
+_SCRIPT_SOURCE="${opanel_ent_UPDATE_ORIGINAL_SCRIPT:-${BASH_SOURCE[0]}}"
+_SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT_SOURCE")/.." && pwd)"
+if [[ -d "$_SCRIPT_DIR/.git" ]]; then
+  SOURCE_DIR="${SOURCE_DIR:-$_SCRIPT_DIR}"
+else
+  SOURCE_DIR="${SOURCE_DIR:-$DEFAULT_SOURCE_DIR}"
+fi
+
+REPO_URL="${REPO_URL:-https://github.com/bnixvn/opanel-ent.git}"
+GIT_REMOTE="${GIT_REMOTE-origin}"                 # remote name in the local checkout
+UPDATE_CHANNEL="${UPDATE_CHANNEL-branch}"         # branch, release, or tag
+BRANCH="${BRANCH-main}"                           # used when UPDATE_CHANNEL=branch
+RELEASE_TAG="${RELEASE_TAG-}"                     # used when UPDATE_CHANNEL=tag
+RELEASE_PATTERN="${RELEASE_PATTERN:-v[0-9]*.[0-9]*.[0-9]*}"
+RELEASE_ZIP_URL="${RELEASE_ZIP_URL:-}"             # optional archive URL template with {tag}
+SKIP_PULL="${SKIP_PULL:-false}"
+UPDATE_STATE_FILE="${UPDATE_STATE_FILE:-/var/lib/opanel-ent/update-status.json}"
+RELEASE_WORK_DIR=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --channel) require_arg "$1" "${2-}"; UPDATE_CHANNEL="$2"; shift 2 ;;
+    --release) UPDATE_CHANNEL="release"; shift ;;
+    --branch) require_arg "$1" "${2-}"; UPDATE_CHANNEL="branch"; BRANCH="$2"; shift 2 ;;
+    --tag) require_arg "$1" "${2-}"; UPDATE_CHANNEL="tag"; RELEASE_TAG="$2"; shift 2 ;;
+    --remote) require_arg "$1" "${2-}"; GIT_REMOTE="$2"; shift 2 ;;
+    --skip-pull) SKIP_PULL="true"; shift ;;
+    --app-dir) require_arg "$1" "${2-}"; APP_DIR="$2"; shift 2 ;;
+    -h|--help)
+      usage
+      exit 0 ;;
+    *) fail "Unknown arg: $1" ;;
+  esac
+done
+
+# --- Validate config --------------------------------------------------------
+require_git_ref_name() {
+  local kind="$1" value="$2"
+  [[ -n "$value" ]] || fail "$kind cannot be empty"
+  [[ "$value" != -* ]] || fail "$kind must not start with '-'"
+  case "$kind" in
+    BRANCH)
+      git check-ref-format --branch "$value" >/dev/null 2>&1 \
+        || fail "BRANCH has invalid git ref characters: $value"
+      ;;
+    RELEASE_TAG)
+      git check-ref-format "refs/tags/$value" >/dev/null 2>&1 \
+        || fail "RELEASE_TAG has invalid git ref characters: $value"
+      ;;
+  esac
+}
+
+[[ -n "$REPO_URL" ]] || fail "REPO_URL cannot be empty"
+[[ -n "$GIT_REMOTE" ]] || fail "GIT_REMOTE cannot be empty"
+[[ "$GIT_REMOTE" != -* ]] || fail "GIT_REMOTE must not start with '-'"
+if ! [[ "$GIT_REMOTE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  fail "GIT_REMOTE must match [A-Za-z0-9._-]+ (got: $GIT_REMOTE)"
+fi
+if [[ "$UPDATE_CHANNEL" != "release" && "$UPDATE_CHANNEL" != "branch" && "$UPDATE_CHANNEL" != "tag" ]]; then
+  fail "UPDATE_CHANNEL must be release|branch|tag (got: $UPDATE_CHANNEL)"
+fi
+[[ "$SKIP_PULL" == "true" || "$SKIP_PULL" == "false" ]] || fail "SKIP_PULL must be true|false"
+if [[ "$UPDATE_CHANNEL" == "branch" ]]; then
+  require_git_ref_name BRANCH "$BRANCH"
+fi
+if [[ "$UPDATE_CHANNEL" == "tag" ]]; then
+  require_git_ref_name RELEASE_TAG "$RELEASE_TAG"
+fi
+if [[ "$UPDATE_CHANNEL" == "release" && -n "$RELEASE_TAG" ]]; then
+  echo "INFO: ignoring RELEASE_TAG in release channel; use --tag to pin ${RELEASE_TAG}."
+fi
+
+env_get() {
+  local file="$APP_DIR/backend/.env" key="$1"
+  [[ -f "$file" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file"
+}
+
+env_set_default() {
+  local file="$APP_DIR/backend/.env" key="$1" value="$2"
+  if ! grep -q "^${key}=" "$file"; then
+    printf '%s=%s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+ensure_git_remote() {
+  if git remote get-url "$GIT_REMOTE" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "Adding git remote ${GIT_REMOTE} -> ${REPO_URL}"
+  git remote add "$GIT_REMOTE" "$REPO_URL"
+}
+
+latest_release_tag() {
+  git ls-remote --tags --refs "$REPO_URL" "refs/tags/${RELEASE_PATTERN}" \
+    | awk '{ sub("refs/tags/", "", $2); print $2 }' \
+    | sort -V \
+    | tail -n 1
+}
+
+release_archive_url() {
+  local tag="$1" repo="$REPO_URL" base
+  if [[ -n "$RELEASE_ZIP_URL" ]]; then
+    printf '%s\n' "${RELEASE_ZIP_URL//\{tag\}/$tag}"
+    return 0
+  fi
+  case "$repo" in
+    https://github.com/*)
+      base="${repo%.git}"
+      ;;
+    git@github.com:*)
+      base="https://github.com/${repo#git@github.com:}"
+      base="${base%.git}"
+      ;;
+    *)
+      fail "Cannot derive release zip URL from REPO_URL. Set RELEASE_ZIP_URL or use --branch."
+      ;;
+  esac
+  printf '%s/archive/refs/tags/%s.zip\n' "$base" "$tag"
+}
+
+download_release_source() {
+  local tag="$1" archive extract_dir archive_url
+  RELEASE_WORK_DIR="$(mktemp -d /tmp/opanel-ent-release-update.XXXXXX)"
+  archive="${RELEASE_WORK_DIR}/opanel-ent-release.zip"
+  extract_dir="${RELEASE_WORK_DIR}/extract"
+  archive_url="$(release_archive_url "$tag")"
+  log "Downloading release ${tag}"
+  curl -fL --connect-timeout 10 --max-time 300 "$archive_url" -o "$archive"
+  mkdir -p "$extract_dir"
+  unzip -q "$archive" -d "$extract_dir"
+  SOURCE_DIR="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/backend" && -d "$SOURCE_DIR/frontend" ]] \
+    || fail "Release archive does not contain backend/frontend source"
+}
+
+reset_worktree_to_ref() {
+  local ref="$1" branch_name="${2-}"
+  if [[ -n "$branch_name" ]]; then
+    git checkout -f -B "$branch_name" "$ref"
+  else
+    git checkout -f --detach "$ref"
+  fi
+  git reset --hard "$ref"
+}
+
+current_panel_version() {
+  sed -nE 's/^APP_VERSION = "([^"]+)"/\1/p' "$APP_DIR/backend/app/core/version.py" 2>/dev/null | head -n 1
+}
+
+write_update_state() {
+  local status="$1" ref="${2:-}" message="${3:-}" now current latest
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  current="$(current_panel_version)"
+  latest="${ref#v}"
+  [[ "$latest" == "$ref" ]] && latest=""
+  install -d -m 0750 "$(dirname "$UPDATE_STATE_FILE")"
+  python3 - "$UPDATE_STATE_FILE" "$status" "$ref" "$latest" "$current" "$message" "$now" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+status, ref, latest, current, message, now = sys.argv[2:8]
+try:
+    state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+except Exception:
+    state = {}
+
+if current:
+    state["current_version"] = current
+if latest:
+    state["latest_tag"] = ref
+    state["latest_version"] = latest
+state["last_update_status"] = status
+if ref:
+    state["last_update_ref"] = ref
+if message:
+    state["last_update_message"] = message
+if status in {"checking", "updating"}:
+    state["last_update_started_at"] = now
+elif status in {"completed", "failed"}:
+    state["last_update_finished_at"] = now
+path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+  if id -u opanel-ent >/dev/null 2>&1; then
+    chown opanel-ent:opanel-ent "$UPDATE_STATE_FILE" 2>/dev/null || true
+  fi
+  chmod 0640 "$UPDATE_STATE_FILE" 2>/dev/null || true
+}
+
+UPDATE_REF=""
+cleanup_release_work_dir() {
+  if [[ -n "${RELEASE_WORK_DIR:-}" && -d "$RELEASE_WORK_DIR" ]]; then
+    rm -rf -- "$RELEASE_WORK_DIR"
+  fi
+}
+
+finish_update_script() {
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    write_update_state "failed" "${UPDATE_REF:-}" "Update failed with exit code ${rc}" || true
+  fi
+  cleanup_release_work_dir
+  cleanup_stable_copy
+}
+trap finish_update_script EXIT
+
+ufw_delete_opanel_rules() {
+  local pattern="$1" number
+  command -v ufw >/dev/null 2>&1 || return 0
+  while read -r number; do
+    [[ -n "$number" ]] || continue
+    ufw --force delete "$number" >/dev/null 2>&1 || true
+  done < <(
+    ufw status numbered 2>/dev/null \
+      | awk -v pattern="$pattern" '
+          index($0, "opanel-ent:PanelZone") {
+            line = $0
+            if (!match(line, /^\[[[:space:]]*[0-9]+\]/)) {
+              next
+            }
+            number = substr(line, RSTART, RLENGTH)
+            gsub(/[^0-9]/, "", number)
+            sub(/^\[[[:space:]]*[0-9]+\][[:space:]]*/, "", line)
+            split(line, parts, /[[:space:]]+ALLOW[[:space:]]+/)
+            target = parts[1]
+            if (target == pattern || target == pattern " (v6)") {
+              print number
+            }
+          }
+        ' \
+      | sort -rn
+  )
+}
+
+ufw_panel_allow_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 0
+  ufw_delete_opanel_rules "${port}/tcp"
+  ufw insert 1 allow "${port}/tcp" comment "opanel-ent:PanelZone" >/dev/null 2>&1 \
+    || ufw insert 1 allow "${port}/tcp" >/dev/null 2>&1 \
+    || ufw allow "${port}/tcp" >/dev/null 2>&1 \
+    || true
+}
+
+detect_server_ip() {
+  hostname -I 2>/dev/null | awk '{print $1}' || true
+}
+
+remove_filebrowser_runtime() {
+  systemctl disable --now filebrowser 2>/dev/null || true
+  rm -f /etc/systemd/system/filebrowser.service
+  rm -rf /etc/systemd/system/filebrowser.service.d
+  rm -rf /etc/filebrowser /var/lib/filebrowser
+  rm -f /usr/local/bin/filebrowser
+  sed -i '/^FILEBROWSER_PORT=/d' "$APP_DIR/backend/.env" 2>/dev/null || true
+  systemctl daemon-reload
+}
+
+write_tools_nginx_config() {
+  local panel_port panel_domain panel_cert panel_key php_version server_ip host api_scheme tools_scheme pma_secure ssl_block
+  panel_port="$(env_get PANEL_PORT)"; panel_port="${panel_port:-2222}"
+  panel_domain="$(env_get PANEL_DOMAIN)"
+  panel_cert="$(env_get PANEL_SSL_CERT)"
+  panel_key="$(env_get PANEL_SSL_KEY)"
+  php_version="${PHP_DEFAULT:-8.4}"
+  server_ip="$(detect_server_ip)"
+  host="${panel_domain:-$server_ip}"
+  api_scheme="http"; tools_scheme="http"; pma_secure="false"; ssl_block=""
+  if [[ -n "$panel_cert" && -n "$panel_key" && -f "$panel_cert" && -f "$panel_key" ]]; then
+    api_scheme="https"; tools_scheme="https"; pma_secure="true"
+    printf -v ssl_block '\n    listen 443 ssl default_server;\n    ssl_certificate %s;\n    ssl_certificate_key %s;' "$panel_cert" "$panel_key"
+  fi
+  cat >/etc/nginx/conf.d/00-opanel-ent-tools.conf <<NGINX
+server {
+    listen 80 default_server;${ssl_block}
+    server_name _;
+    client_max_body_size 1100M;
+
+    location = /phpmyadmin { return 301 /phpmyadmin/; }
+    location /phpmyadmin/ { alias /usr/share/phpmyadmin/; index index.php; try_files \$uri \$uri/ =404; }
+    location ~ ^/phpmyadmin/(.+\.php)$ {
+        alias /usr/share/phpmyadmin/\$1;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /usr/share/phpmyadmin/\$1;
+        fastcgi_param SCRIPT_NAME /phpmyadmin/\$1;
+        fastcgi_pass unix:/run/php/php${php_version}-fpm.sock;
+        fastcgi_read_timeout 300;
+    }
+}
+NGINX
+  sed -i -E "/api\/databases\/phpmyadmin-sso/s#'[^']+/api/databases/phpmyadmin-sso/'#'${api_scheme}://127.0.0.1:${panel_port}/api/databases/phpmyadmin-sso/'#" /usr/share/phpmyadmin/opanel-ent-signon.php 2>/dev/null || true
+  sed -i -E "s#('secure' => )(true|false)#\1${pma_secure}#" /etc/phpmyadmin/conf.d/opanel-ent-signon.php /usr/share/phpmyadmin/opanel-ent-signon.php 2>/dev/null || true
+  [[ -n "$host" ]] && sed -i -E "/PmaAbsoluteUri/s#'https?://[^']+/phpmyadmin/'#'${tools_scheme}://${host}/phpmyadmin/'#" /etc/phpmyadmin/conf.d/opanel-ent-signon.php 2>/dev/null || true
+}
+
+configure_fastcgi_cache() {
+  install -d -o www-data -g www-data -m 0755 /var/cache/nginx/opanel-ent-fastcgi
+  find /var/cache/nginx/opanel-ent-fastcgi -mindepth 1 -delete
+  cat >/etc/nginx/conf.d/00-opanel-ent-fastcgi-cache.conf <<'NGINX'
+fastcgi_cache_path /var/cache/nginx/opanel-ent-fastcgi levels=1:2 keys_zone=opanel_ent_FASTCGI:32m inactive=30m max_size=256m use_temp_path=off;
+fastcgi_cache_key "$scheme$request_method$host$request_uri";
+NGINX
+}
+
+ensure_terminal_tools() {
+  local missing=()
+  command -v composer >/dev/null 2>&1 || missing+=(composer)
+  command -v zip >/dev/null 2>&1 || missing+=(zip)
+  command -v unzip >/dev/null 2>&1 || missing+=(unzip)
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log "Installing terminal/file-manager tools: ${missing[*]}"
+    DEBIAN_FRONTEND=noninteractive apt-get update --allow-releaseinfo-change
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+  fi
+}
+
+harden_existing_panel_users() {
+  local user home_dir site_dir
+  getent group opanel-ent-sftp >/dev/null || return 0
+  chown root:root /home
+  chmod 0711 /home
+  chmod a-s /home 2>/dev/null || true
+  chmod -t /home 2>/dev/null || true
+  while IFS= read -r user; do
+    [[ -n "$user" ]] || continue
+    case "$user" in
+      root|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|_apt|nobody|opanel-ent|opanel-ent-sites|opanel-ent-sftp|mysql|redis|nginx)
+        continue ;;
+    esac
+    id -u "$user" >/dev/null 2>&1 || continue
+    getent group "$user" >/dev/null || groupadd "$user" 2>/dev/null || true
+    usermod -aG "$user" www-data 2>/dev/null || true
+    home_dir="/home/$user"
+    usermod --home "$home_dir" --shell /usr/sbin/nologin --gid "$user" "$user" 2>/dev/null || true
+    mkdir -p "$home_dir"
+    chown "root:$user" "$home_dir"
+    chmod 0751 "$home_dir"
+    chmod a-s "$home_dir" 2>/dev/null || true
+    chmod -t "$home_dir" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+      setfacl -b -k "$home_dir" 2>/dev/null || true
+    fi
+    find "$home_dir" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | while IFS= read -r -d '' site_dir; do
+      [[ "$(basename "$site_dir")" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || continue
+      chown -R "$user:opanel-ent-sites" "$site_dir" 2>/dev/null || true
+      if command -v setfacl >/dev/null 2>&1; then
+        setfacl -Rb "$site_dir" 2>/dev/null || true
+        find "$site_dir" -type d -exec setfacl -k {} + 2>/dev/null || true
+      fi
+      find "$site_dir" -type d -exec chmod 2750 {} + 2>/dev/null || true
+      find "$site_dir" -type d -exec chmod u-s {} + 2>/dev/null || true
+      find "$site_dir" -type d -exec chmod -t {} + 2>/dev/null || true
+      find "$site_dir" -type f -exec chmod 640 {} + 2>/dev/null || true
+    done
+    if [[ -d "/var/lib/php/uploads/$user" ]]; then
+      chown "$user:opanel-ent-sites" "/var/lib/php/uploads/$user" 2>/dev/null || true
+      chmod 2700 "/var/lib/php/uploads/$user" 2>/dev/null || true
+      chmod g+s "/var/lib/php/uploads/$user" 2>/dev/null || true
+    fi
+  done < <(getent group opanel-ent-sftp | awk -F: '{gsub(",", "\n", $4); print $4}')
+}
+
+install_panel_runtime() {
+  local env_file="$APP_DIR/backend/.env"
+  [[ -f "$env_file" ]] || return 0
+  local panel_port panel_url server_ip sshd_config sshd_backup
+  panel_port="$(env_get PANEL_PORT)"
+  panel_port="${panel_port:-2222}"
+  server_ip="$(detect_server_ip)"
+  panel_url="$(env_get PANEL_URL)"
+  panel_url="${panel_url:-http://${server_ip:-127.0.0.1}:${panel_port}}"
+
+  env_set_default PANEL_PORT "$panel_port"
+  env_set_default PANEL_URL "$panel_url"
+  env_set_default PANEL_DOMAIN ""
+  env_set_default PANEL_SSL_CERT ""
+  env_set_default PANEL_SSL_KEY ""
+  env_set_default FRONTEND_DIST "$APP_DIR/frontend/dist"
+  env_set_default REDIS_URL "redis://localhost:6379/0"
+  env_set_default RATE_LIMIT_BACKEND "redis"
+  if [[ -z "$(env_get ALLOWED_ORIGINS)" ]]; then
+    env_set_default ALLOWED_ORIGINS "$panel_url"
+  fi
+
+  remove_filebrowser_runtime
+
+  getent group opanel-ent-sites >/dev/null || groupadd --system opanel-ent-sites
+  getent group opanel-ent-sftp >/dev/null || groupadd --system opanel-ent-sftp
+  if ! command -v setfacl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update --allow-releaseinfo-change
+    DEBIAN_FRONTEND=noninteractive apt-get install -y acl
+  fi
+  usermod -aG opanel-ent-sites opanel-ent 2>/dev/null || true
+  usermod -aG opanel-ent-sites www-data 2>/dev/null || true
+  harden_existing_panel_users
+  install -d -o root -g opanel-ent -m 2775 /etc/nginx/conf.d
+  chmod g+s /etc/nginx/conf.d 2>/dev/null || true
+  install -d -o root -g opanel-ent -m 2775 /etc/nginx/opanel-ent/custom
+  chmod g+s /etc/nginx/opanel-ent/custom 2>/dev/null || true
+  install -d -o opanel-ent -g opanel-ent -m 0750 /var/lib/opanel-ent
+  if command -v sshd >/dev/null 2>&1; then
+    sshd_config="/etc/ssh/sshd_config"
+    sshd_backup="${sshd_config}.opanel-ent.bak"
+    install -d -o root -g root -m 0755 /run/sshd
+    rm -f /etc/ssh/sshd_config.d/99-opanel-ent-sftp.conf 2>/dev/null || true
+    touch "$sshd_config"
+    cp "$sshd_config" "$sshd_backup"
+    sed -i '/^# BEGIN opanel-ent SFTP USERS$/,/^# END opanel-ent SFTP USERS$/d' "$sshd_config"
+    cat >>"$sshd_config" <<'SSHD'
+# BEGIN opanel-ent SFTP USERS
+# Allow opanel-ent Linux users to log in with SFTP using their panel password.
+# SSH shells are intentionally disabled; /home/%u is a root-owned chroot.
+Match Group opanel-ent-sftp
+    PasswordAuthentication yes
+    ChrootDirectory /home/%u
+    ForceCommand internal-sftp -d /
+    PermitTTY no
+    X11Forwarding no
+    AllowTcpForwarding no
+    PermitTunnel no
+# END opanel-ent SFTP USERS
+SSHD
+    if sshd -t; then
+      systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    else
+      cp "$sshd_backup" "$sshd_config"
+      echo "WARNING: invalid SSHD configuration; skipped opanel-ent SFTP password block"
+    fi
+  fi
+
+  cat >/usr/local/sbin/opanel-ent-api-start <<STARTER
+#!/usr/bin/env bash
+# Trusted forwarders: only the local Nginx (127.0.0.1) is allowed to set
+# X-Forwarded-For / X-Forwarded-Proto. Anything else (direct hits on
+# the configured panel port) cannot spoof the audit log IP or the login rate-limit key.
+set -euo pipefail
+cd ${APP_DIR}/backend
+args=(app.main:app --host 0.0.0.0 --port "\${PANEL_PORT:-2222}" --proxy-headers --forwarded-allow-ips "127.0.0.1")
+if [[ -n "\${PANEL_SSL_CERT:-}" && -n "\${PANEL_SSL_KEY:-}" && -f "\${PANEL_SSL_CERT}" && -f "\${PANEL_SSL_KEY}" ]]; then
+  args+=(--ssl-certfile "\${PANEL_SSL_CERT}" --ssl-keyfile "\${PANEL_SSL_KEY}")
+fi
+exec ${APP_DIR}/backend/.venv/bin/uvicorn "\${args[@]}"
+STARTER
+  chmod 0755 /usr/local/sbin/opanel-ent-api-start
+  mkdir -p /etc/systemd/system/opanel-ent-api.service.d
+  cat >/etc/systemd/system/opanel-ent-api.service.d/20-panel-port.conf <<SERVICE
+[Service]
+WorkingDirectory=${APP_DIR}/backend
+EnvironmentFile=
+EnvironmentFile=${APP_DIR}/backend/.env
+Environment=HOME=${APP_DIR}
+ExecStart=
+ExecStart=/usr/local/sbin/opanel-ent-api-start
+SupplementaryGroups=www-data opanel-ent-sites
+ProtectHome=false
+ReadWritePaths=
+ReadWritePaths=${APP_DIR} /home /var/backups/opanel-ent /etc/nginx/conf.d /etc/nginx/opanel-ent/custom /tmp /var/lib/opanel-ent
+SERVICE
+  cat >/etc/systemd/system/opanel-ent-backup-scheduler.service <<SERVICE
+[Unit]
+Description=opanel-ent scheduled backup runner
+After=network.target mariadb.service
+
+[Service]
+Type=oneshot
+User=opanel-ent
+Group=opanel-ent
+SupplementaryGroups=www-data opanel-ent-sites
+WorkingDirectory=${APP_DIR}/backend
+EnvironmentFile=${APP_DIR}/backend/.env
+Environment=HOME=${APP_DIR}
+Environment=opanel_ent_USE_HELPER=true
+ExecStart=${APP_DIR}/backend/.venv/bin/python -m app.services.backup_scheduler
+NoNewPrivileges=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=/home /var/backups/opanel-ent /etc/nginx/conf.d /etc/nginx/opanel-ent/custom /tmp /var/lib/opanel-ent ${APP_DIR}
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+  cat >/etc/systemd/system/opanel-ent-backup-scheduler.timer <<'SERVICE'
+[Unit]
+Description=Run opanel-ent scheduled backups every minute
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+SERVICE
+  systemctl daemon-reload
+  if command -v ufw >/dev/null 2>&1; then
+    for default_port in 80 443 465 587 "${panel_port}"; do
+      ufw_panel_allow_port "$default_port"
+    done
+  fi
+  rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
+  rm -f /etc/nginx/sites-enabled/opanel-ent.conf /etc/nginx/sites-available/opanel-ent.conf 2>/dev/null || true
+  write_tools_nginx_config
+  if [[ -f /usr/share/phpmyadmin/opanel-ent-signon.php ]]; then
+    local scheme="http"
+    if [[ -n "$(env_get PANEL_SSL_CERT)" && -n "$(env_get PANEL_SSL_KEY)" ]]; then
+      scheme="https"
+    fi
+    sed -i -E "/api\/databases\/phpmyadmin-sso/s#'[^']+/api/databases/phpmyadmin-sso/'#'${scheme}://127.0.0.1:${panel_port}/api/databases/phpmyadmin-sso/'#" /usr/share/phpmyadmin/opanel-ent-signon.php || true
+  fi
+}
+
+panel_healthcheck() {
+  local port
+  port="$(env_get PANEL_PORT)"
+  port="${port:-2222}"
+  curl -kfsS --connect-timeout 2 --max-time 5 "https://127.0.0.1:${port}/api/health" >/dev/null 2>&1 \
+    || curl -fsS --connect-timeout 2 --max-time 5 "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1
+}
+
+refresh_opanel_mariadb_grants() {
+  local defaults_file="$APP_DIR/.my.cnf"
+  [[ -f "$defaults_file" ]] || return 0
+  local mysql_bin
+  mysql_bin="$(command -v mariadb || command -v mysql || true)"
+  [[ -n "$mysql_bin" ]] || return 0
+  local password
+  password="$(awk -F= '
+    /^\[client\]/ { in_client=1; next }
+    /^\[/ { in_client=0 }
+    in_client && $1 == "password" {
+      value=$0; sub(/^[^=]*=/, "", value); gsub(/^"|"$/, "", value); print value; exit
+    }
+  ' "$defaults_file")"
+  [[ -n "$password" ]] || return 0
+  "$mysql_bin" <<SQL
+CREATE USER IF NOT EXISTS 'opanel-ent'@'localhost' IDENTIFIED BY '${password}';
+ALTER USER 'opanel-ent'@'localhost' IDENTIFIED BY '${password}';
+GRANT ALL PRIVILEGES ON *.* TO 'opanel-ent'@'localhost' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+SQL
+}
+
+ensure_panel_runtime_ownership() {
+  id -u opanel-ent >/dev/null 2>&1 || return 0
+  [[ -d "$APP_DIR/backend" ]] && chown -R opanel-ent:opanel-ent "$APP_DIR/backend" 2>/dev/null || true
+  [[ -d "$APP_DIR/frontend" ]] && chown -R opanel-ent:opanel-ent "$APP_DIR/frontend" 2>/dev/null || true
+  [[ -d /var/lib/opanel-ent ]] && chown opanel-ent:opanel-ent /var/lib/opanel-ent 2>/dev/null || true
+  [[ -d /var/lib/opanel-ent/assets ]] && chown -R opanel-ent:opanel-ent /var/lib/opanel-ent/assets 2>/dev/null || true
+  [[ -f "$APP_DIR/backend/.env" ]] && chmod 0640 "$APP_DIR/backend/.env"
+}
+
+# --- Snapshot the SQLite DB before doing anything ---------------------------
+backup_db() {
+  local db_path="$APP_DIR/backend/opanel-ent.db"
+  if [[ ! -f "$db_path" ]]; then
+    return 0
+  fi
+  local snap_dir="${BACKUP_ROOT:-/var/backups/opanel-ent}/db-snapshots"
+  install -d -m 0750 "$snap_dir"
+  if id -u opanel-ent >/dev/null 2>&1; then
+    chown opanel-ent:opanel-ent "$snap_dir" 2>/dev/null || true
+  fi
+  local stamp
+  stamp=$(date -u +%Y%m%d-%H%M%S)
+  local snap="$snap_dir/opanel-ent-$stamp.db"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$db_path" ".backup '$snap'"
+  else
+    cp -a "$db_path" "$snap"
+  fi
+  echo "DB snapshot saved: $snap"
+  # Keep the 10 most recent snapshots.
+  ls -1t "$snap_dir"/opanel-ent-*.db 2>/dev/null | tail -n +11 | xargs -r rm -f
+}
+
+log "Backing up SQLite DB before update"
+backup_db
+write_update_state "checking" "" "Checking for opanel-ent releases"
+
+# --- Fetch source -----------------------------------------------------------
+if [[ "$SKIP_PULL" == "true" ]]; then
+  if [[ "$(readlink -f "$SOURCE_DIR")" == "$(readlink -f "$APP_DIR")" ]]; then
+    fail "SOURCE_DIR ($SOURCE_DIR) and APP_DIR ($APP_DIR) must be different."
+  fi
+  UPDATE_REF="local:${SOURCE_DIR}"
+  write_update_state "updating" "$UPDATE_REF" "Syncing opanel-ent from ${SOURCE_DIR}"
+else
+  case "$UPDATE_CHANNEL" in
+    release)
+      log "Checking latest release from ${REPO_URL}"
+      RELEASE_TAG="$(latest_release_tag)"
+      [[ -n "$RELEASE_TAG" ]] || fail "No release tags found matching $RELEASE_PATTERN"
+      UPDATE_REF="$RELEASE_TAG"
+      write_update_state "updating" "$UPDATE_REF" "Updating opanel-ent from ${UPDATE_REF}"
+      download_release_source "$RELEASE_TAG"
+      echo "Release: ${RELEASE_TAG}"
+      ;;
+    tag)
+      [[ -n "$RELEASE_TAG" ]] || fail "--tag requires a release tag"
+      UPDATE_REF="$RELEASE_TAG"
+      write_update_state "updating" "$UPDATE_REF" "Updating opanel-ent from ${UPDATE_REF}"
+      download_release_source "$RELEASE_TAG"
+      echo "Release: ${RELEASE_TAG}"
+      ;;
+    branch)
+      if [[ "$(readlink -f "$SOURCE_DIR")" == "$(readlink -f "$APP_DIR")" ]]; then
+        fail "SOURCE_DIR ($SOURCE_DIR) and APP_DIR ($APP_DIR) must be different."
+      fi
+      if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+        if [[ -e "$SOURCE_DIR" && -n "$(ls -A "$SOURCE_DIR" 2>/dev/null)" ]]; then
+          source_backup="${SOURCE_DIR}.release-archive-$(date -u +%Y%m%d-%H%M%S)"
+          log "Archiving non-git release source to ${source_backup}"
+          cd /
+          mv "$SOURCE_DIR" "$source_backup"
+        fi
+        log "Cloning ${REPO_URL} to ${SOURCE_DIR} with remote ${GIT_REMOTE}"
+        git clone -o "$GIT_REMOTE" "$REPO_URL" "$SOURCE_DIR"
+      fi
+      cd "$SOURCE_DIR"
+      ensure_git_remote
+      remote_branch="${GIT_REMOTE}/${BRANCH}"
+      log "Pulling latest from ${remote_branch}"
+      git fetch --prune "$GIT_REMOTE" "+refs/heads/${BRANCH}:refs/remotes/${GIT_REMOTE}/${BRANCH}" --tags
+      UPDATE_REF="$remote_branch"
+      write_update_state "updating" "$UPDATE_REF" "Updating opanel-ent from ${UPDATE_REF}"
+      reset_worktree_to_ref "$remote_branch" "$BRANCH"
+      echo "HEAD: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
+      ;;
+    *)
+      fail "Unsupported UPDATE_CHANNEL: $UPDATE_CHANNEL"
+      ;;
+  esac
+fi
+
+# --- Validate ---------------------------------------------------------------
+[[ -d "$SOURCE_DIR/backend"  ]] || fail "Missing $SOURCE_DIR/backend"
+[[ -d "$SOURCE_DIR/frontend" ]] || fail "Missing $SOURCE_DIR/frontend"
+
+# --- Sync code into APP_DIR -------------------------------------------------
+log "Syncing source to $APP_DIR"
+mkdir -p "$APP_DIR"
+
+if command -v rsync >/dev/null 2>&1; then
+  # --filter='protect ...' keeps the destination file even when --delete
+  # would otherwise remove it because the source side doesn't have it. We use
+  # this for runtime artefacts that the installer creates: .env, .venv,
+  # OPanel Enterprise.db, .my.cnf.
+  rsync -a --delete \
+    --filter='protect /.env' \
+    --filter='protect /.venv' \
+    --filter='protect /.venv/**' \
+    --filter='protect /opanel-ent.db' \
+    --filter='protect /.my.cnf' \
+    --exclude '__pycache__/' \
+    --exclude '*.pyc' \
+    "$SOURCE_DIR/backend/" "$APP_DIR/backend/"
+  rsync -a --delete \
+    --filter='protect /node_modules' \
+    --filter='protect /node_modules/**' \
+    --filter='protect /dist' \
+    --filter='protect /dist/**' \
+    --filter='protect /.vite' \
+    --filter='protect /.vite/**' \
+    "$SOURCE_DIR/frontend/" "$APP_DIR/frontend/"
+else
+  cp -r "$SOURCE_DIR/backend/."  "$APP_DIR/backend/"
+  cp -r "$SOURCE_DIR/frontend/." "$APP_DIR/frontend/"
+fi
+ensure_panel_runtime_ownership
+
+# Defensive: if .env still doesn't exist (e.g. fresh deploy syncing on top of
+# nothing), leave a clear error message.
+if [[ ! -f "$APP_DIR/backend/.env" ]]; then
+  fail "$APP_DIR/backend/.env is missing. Run installer/install.sh first or restore .env from backup."
+fi
+log "Installing direct panel runtime"
+install_panel_runtime
+log "Configuring Nginx FastCGI cache"
+configure_fastcgi_cache
+ensure_terminal_tools
+venv_needs_recreate=false
+if [[ ! -x "$APP_DIR/backend/.venv/bin/uvicorn" ]]; then
+  venv_needs_recreate=true
+elif ! head -n1 "$APP_DIR/backend/.venv/bin/uvicorn" 2>/dev/null | grep -Fq "$APP_DIR/backend/.venv"; then
+  venv_needs_recreate=true
+fi
+if [[ "$venv_needs_recreate" == "true" ]]; then
+  log "Recreating Python virtualenv (missing or stale path)"
+  rm -rf "$APP_DIR/backend/.venv"
+  python3 -m venv "$APP_DIR/backend/.venv"
+fi
+
+# --- Refresh helper + sudoers (idempotent) ---------------------------------
+if [[ -f "$SOURCE_DIR/installer/files/opanel-ent-helper.sh" ]]; then
+  log "Refreshing /usr/local/sbin/opanel-ent-helper and /etc/sudoers.d/opanel-ent"
+  if id -u opanel-ent >/dev/null 2>&1; then
+    install -m 0750 -o root -g opanel-ent "$SOURCE_DIR/installer/files/opanel-ent-helper.sh" /usr/local/sbin/opanel-ent-helper
+    sed -i "s#^APP_DIR=\"/opt/opanel-ent\"#APP_DIR=\"${APP_DIR}\"#" /usr/local/sbin/opanel-ent-helper
+    install -m 0440 -o root -g root  "$SOURCE_DIR/installer/files/opanel-ent-sudoers"   /etc/sudoers.d/opanel-ent
+    visudo -c -f /etc/sudoers.d/opanel-ent >/dev/null
+    sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper wp --info >/dev/null
+    sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper php-fpm-retune >/dev/null || \
+      echo "  (warning: could not retune existing PHP-FPM pools; site refresh will retry later)"
+    sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper mariadb-retune >/dev/null || \
+      echo "  (warning: could not retune MariaDB; update will continue with existing settings)"
+  else
+    echo "  (opanel-ent user not found; skipping helper refresh - run install.sh first)"
+  fi
+fi
+
+if [[ -f "$SOURCE_DIR/installer/rescue-ufw-blocklist.sh" ]]; then
+  log "Refreshing UFW blocklist rescue command"
+  install -m 0755 -o root -g root "$SOURCE_DIR/installer/rescue-ufw-blocklist.sh" /usr/local/sbin/opanel-ent-rescue-ufw-blocklist
+fi
+
+if [[ -f "$SOURCE_DIR/change_IP.sh" ]]; then
+  log "Refreshing panel IP change command"
+  install -m 0755 -o root -g root "$SOURCE_DIR/change_IP.sh" /usr/local/sbin/opanel-ent-change-ip
+fi
+
+if [[ -f "$SOURCE_DIR/installer/update.sh" ]]; then
+  log "Refreshing panel update command"
+  install -m 0755 -o root -g root "$SOURCE_DIR/installer/update.sh" /usr/local/sbin/opanel-ent-update
+fi
+
+if [[ -f "$SOURCE_DIR/installer/files/opanel-ent-ctl" ]]; then
+  log "Refreshing SSH menu command: opanel-ent"
+  install -m 0755 -o root -g root "$SOURCE_DIR/installer/files/opanel-ent-ctl" /usr/local/sbin/opanel-ent
+  ln -sfn /usr/local/sbin/opanel-ent /usr/local/sbin/opanel-ent-ctl
+  sed -i "s#APP_DIR=\"\${APP_DIR:-/opt/opanel-ent}\"#APP_DIR=\"\${APP_DIR:-${APP_DIR}}\"#" /usr/local/sbin/opanel-ent /usr/local/sbin/opanel-ent-ctl 2>/dev/null || true
+fi
+
+log "Ensuring Nginx ModSecurity WAF engine is installed"
+if id -u opanel-ent >/dev/null 2>&1; then
+  sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper waf-install || \
+    echo "WARNING: WAF engine installation failed; continuing without ModSecurity."
+  sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper certbot-auto-renew-install >/dev/null 2>&1 || true
+  sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper nginx-blocklist-timer-install >/dev/null 2>&1 || true
+  sudo -u opanel-ent env HOME="$APP_DIR" sudo -n /usr/local/sbin/opanel-ent-helper nginx-blocklist-run >/dev/null 2>&1 || true
+else
+  echo "  (opanel-ent user not found; skipping WAF install - run install.sh first)"
+fi
+
+# --- Restore ownership so opanel-ent user can read/write the deploy ------------
+if id -u opanel-ent >/dev/null 2>&1; then
+  ensure_panel_runtime_ownership
+fi
+
+# --- Backend ---------------------------------------------------------------
+log "Updating backend dependencies"
+cd "$APP_DIR/backend"
+if [[ ! -d .venv ]]; then
+  python3 -m venv .venv
+fi
+# shellcheck disable=SC1091
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+log "Refreshing MariaDB grants"
+refresh_opanel_mariadb_grants
+
+log "Running database migrations"
+if id -u opanel-ent >/dev/null 2>&1; then
+  # Run migrations as the opanel-ent user so the SQLite file ownership stays correct.
+  sudo -u opanel-ent "$APP_DIR/backend/.venv/bin/python" -c \
+    "from app.core.database import run_migrations; run_migrations()"
+else
+  python -c "from app.core.database import run_migrations; run_migrations()"
+fi
+systemctl enable --now opanel-ent-backup-scheduler.timer >/dev/null 2>&1 || true
+
+log "Refreshing managed site permissions"
+if id -u opanel-ent >/dev/null 2>&1; then
+  sudo -u opanel-ent env HOME="$APP_DIR" opanel_ent_USE_HELPER=true "$APP_DIR/backend/.venv/bin/python" - <<'PY'
+from app.core.database import SessionLocal
+from app.models.entities import Website
+from app.services import nginx, site_users, waf
+
+with SessionLocal() as db:
+    websites = db.query(Website).all()
+    try:
+        result = nginx.sync_http_flood_zones(websites)
+        if result.returncode != 0:
+            print(f"WARNING: could not refresh HTTP flood zones: {result.stderr or result.stdout}")
+    except Exception as exc:
+        print(f"WARNING: could not refresh HTTP flood zones: {exc}")
+    for website in websites:
+        try:
+            if website.linux_user:
+                runtime_php_version = website.php_version if (website.app_type or "wordpress") in {"wordpress", "php"} else None
+                site_users.ensure_site_runtime(website.domain, website.root_path, runtime_php_version, website.linux_user)
+                site_users.ensure_document_root(
+                    website.root_path,
+                    getattr(website, "document_root", "public_html") or "public_html",
+                    website.linux_user,
+                )
+            site_users.fix_site_permissions(website.root_path, website.linux_user)
+            result = waf.sync_website_rules(website)
+            if result.returncode != 0:
+                print(f"WARNING: could not refresh WAF rules for {website.domain}: {result.stderr or result.stdout}")
+            if getattr(website, "nginx_config_mode", "managed") != "managed":
+                website.nginx_config_mode = "managed"
+                db.commit()
+            app_type = website.app_type or "wordpress"
+            runtime_php_version = website.php_version if app_type in {"wordpress", "php"} else None
+            nginx.rewrite_vhost(
+                website.domain,
+                website.root_path,
+                app_type=app_type,
+                php_version=website.php_version,
+                custom_directives=website.nginx_custom or "",
+                php_fpm_socket_override=site_users.site_php_fpm_socket(website.linux_user, website.root_path, runtime_php_version),
+                waf_enabled=website.waf_enabled,
+                http_flood_enabled=website.http_flood_enabled,
+                http_flood_config=website.http_flood_config or "",
+                document_root=getattr(website, "document_root", "public_html") or "public_html",
+                rewrite_mode=getattr(website, "nginx_rewrite_mode", "none") or "none",
+            )
+        except Exception as exc:
+            print(f"WARNING: could not refresh permissions for {website.domain}: {exc}")
+    try:
+        result = nginx.sync_http_flood_zones(websites)
+        if result.returncode != 0:
+            print(f"WARNING: could not refresh HTTP flood zones: {result.stderr or result.stdout}")
+    except Exception as exc:
+        print(f"WARNING: could not refresh HTTP flood zones: {exc}")
+PY
+fi
+
+log "Compiling backend modules"
+python -m py_compile \
+  app/main.py \
+  app/api/auth.py \
+  app/api/users.py \
+  app/api/websites.py \
+  app/api/databases.py \
+  app/api/maintenance.py \
+  app/api/firewall.py \
+  app/api/services.py \
+  app/api/updates.py \
+  app/api/waf.py \
+  app/api/panel_settings.py \
+  app/api/terminal.py \
+  app/services/firewall.py \
+  app/services/nginx.py \
+  app/services/panel_urls.py \
+  app/services/panel_settings.py \
+  app/services/updates.py \
+  app/services/waf.py \
+  app/services/mariadb.py \
+  app/services/wordpress.py \
+  app/services/file_manager.py \
+  app/services/backup.py \
+  app/services/backup_scheduler.py \
+  app/services/storage_quota.py \
+  app/services/site_users.py \
+  app/services/cron.py \
+  app/services/php.py \
+  app/schemas/schemas.py \
+  app/seed.py
+deactivate
+
+log "Restarting opanel-ent-api"
+mkdir -p /etc/systemd/system/opanel-ent-api.service.d
+cat >/etc/systemd/system/opanel-ent-api.service.d/10-opanel-ent-helper.conf <<'SERVICE'
+[Service]
+NoNewPrivileges=false
+ProtectSystem=false
+RestrictSUIDSGID=false
+CapabilityBoundingSet=~
+SystemCallFilter=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SERVICE
+systemctl daemon-reload
+systemctl restart opanel-ent-api
+
+# --- Frontend --------------------------------------------------------------
+log "Building frontend (clean rebuild)"
+cd "$APP_DIR/frontend"
+
+# Check Node.js availability
+if ! command -v node >/dev/null 2>&1; then
+  log "WARNING: Node.js not found, installing..."
+  DEBIAN_FRONTEND=noninteractive apt-get update --allow-releaseinfo-change
+  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm
+fi
+echo "Node version: $(node --version)"
+echo "npm version: $(npm --version)"
+
+rm -rf dist .vite node_modules/.vite
+
+if [[ ! -d node_modules ]] || [[ package.json -nt node_modules ]]; then
+  log "Installing npm dependencies..."
+  rm -rf node_modules package-lock.json
+  npm install
+fi
+log "Building frontend with VITE_API_URL=/api..."
+VITE_API_URL=/api npm run build 2>&1 || { log "BUILD FAILED"; exit 1; }
+
+[[ -f dist/index.html ]] || fail "Frontend build failed: dist/index.html missing"
+HASHED=$(grep -oE 'index-[a-zA-Z0-9_-]+\.js' dist/index.html | head -n1 || true)
+echo "Built bundle: ${HASHED:-unknown}"
+
+# Make sure nginx (www-data) can read the freshly built bundle.
+chmod o+rX "$APP_DIR" "$APP_DIR/frontend" 2>/dev/null || true
+chmod -R o+rX "$APP_DIR/frontend/dist"
+
+# The API mounts /assets only when the built directory exists at process start.
+# Restart once more after the clean frontend rebuild so newly hashed JS/CSS
+# files are served as static assets instead of falling through to index.html.
+log "Restarting opanel-ent-api after frontend build"
+systemctl restart opanel-ent-api
+
+# --- Reload Nginx ----------------------------------------------------------
+log "Reloading nginx"
+nginx -t
+systemctl reload nginx
+
+# --- Health check ----------------------------------------------------------
+log "Health check"
+for _ in {1..20}; do
+  if panel_healthcheck; then
+    echo "API is healthy."
+    echo ""
+    echo "Update completed."
+    echo "If the browser still shows the old UI, hard refresh (Ctrl + Shift + R)."
+    write_update_state "completed" "${UPDATE_REF:-}" "Update completed"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "API did not respond. Check logs:"
+echo "  journalctl -u opanel-ent-api -n 100 --no-pager"
+write_update_state "failed" "${UPDATE_REF:-}" "API health check failed after update"
+exit 1
