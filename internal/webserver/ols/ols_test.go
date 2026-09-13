@@ -3,6 +3,7 @@ package ols
 import (
 	"flag"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,6 +57,20 @@ func goldenCheck(t *testing.T, name string, got []byte) {
 	}
 }
 
+// siteVhost returns the rendered config for one domain. The render also
+// contains the ACME catch-all, so positional access is not safe.
+func siteVhost(t *testing.T, r webserver.Rendered, domain string) []byte {
+	t.Helper()
+	want := ManagedDir + "/vhosts/" + domain + "/vhconf.conf"
+	for _, f := range r.Vhosts {
+		if f.Path == want {
+			return f.Content
+		}
+	}
+	t.Fatalf("no vhost rendered for %q", domain)
+	return nil
+}
+
 func newBackend(t *testing.T) *Backend {
 	t.Helper()
 	b, err := New()
@@ -92,8 +107,10 @@ func TestRenderGolden(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	goldenCheck(t, "httpd_config.conf", r.Main.Content)
-	for i, f := range r.Vhosts {
-		goldenCheck(t, "vhost_"+sites[i].Domain+".conf", f.Content)
+	// Named from the rendered path rather than the input index: the render
+	// also emits the ACME catch-all, so the two lists are not parallel.
+	for _, f := range r.Vhosts {
+		goldenCheck(t, "vhost_"+path.Base(path.Dir(f.Path))+".conf", f.Content)
 	}
 }
 
@@ -127,8 +144,10 @@ func TestRenderNoSites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if len(r.Vhosts) != 0 {
-		t.Fatalf("got %d vhosts for an empty site list", len(r.Vhosts))
+	// Only the ACME catch-all: a host with no sites must still be able to
+	// obtain a certificate for its first one.
+	if len(r.Vhosts) != 1 {
+		t.Fatalf("got %d vhosts for an empty site list, want just the ACME catch-all", len(r.Vhosts))
 	}
 	main := string(r.Main.Content)
 	if !strings.Contains(main, "listener opanel_http") {
@@ -190,7 +209,7 @@ func TestStaticSiteHasNoInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	body := string(r.Vhosts[0].Content)
+	body := string(siteVhost(t, r, s.Domain))
 	for _, forbidden := range []string{"extprocessor", "scripthandler", "lsapi"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("static site config contains %q", forbidden)
@@ -215,10 +234,10 @@ func TestExtAppNameCarriesTheVersion(t *testing.T) {
 		t.Fatalf("render 8.1: %v", err)
 	}
 
-	if !strings.Contains(string(r84.Vhosts[0].Content), "uds://tmp/lshttpd/lsphp84_example_com.sock") {
+	if !strings.Contains(string(siteVhost(t, r84, "example.com")), "uds://tmp/lshttpd/lsphp84_example_com.sock") {
 		t.Error("8.4 socket path does not carry the version")
 	}
-	if !strings.Contains(string(r81.Vhosts[0].Content), "uds://tmp/lshttpd/lsphp81_example_com.sock") {
+	if !strings.Contains(string(siteVhost(t, r81, "example.com")), "uds://tmp/lshttpd/lsphp81_example_com.sock") {
 		t.Error("8.1 socket path does not carry the version")
 	}
 }
@@ -232,7 +251,7 @@ func TestPHPSiteRunsAsItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	body := string(r.Vhosts[0].Content)
+	body := string(siteVhost(t, r, s.Domain))
 	for _, want := range []string{
 		"extUser                   alice",
 		"extGroup                  alice",
@@ -257,7 +276,7 @@ func TestSuspendedSiteServesOnlyTheNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	body := string(r.Vhosts[0].Content)
+	body := string(siteVhost(t, r, s.Domain))
 
 	if !strings.Contains(body, "docRoot                       "+webserver.SuspendedRoot) {
 		t.Error("document root was not swapped for the suspension notice")
@@ -323,8 +342,14 @@ func TestVhostPathsAreUnderManagedDir(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	want := ManagedDir + "/vhosts/example.com/vhconf.conf"
-	if r.Vhosts[0].Path != want {
-		t.Errorf("vhost path = %q, want %q", r.Vhosts[0].Path, want)
+	var found bool
+	for _, f := range r.Vhosts {
+		if f.Path == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no vhost rendered at %q", want)
 	}
 	// The main config references it relative to the server root.
 	if !strings.Contains(string(r.Main.Content), "conf/opanel/vhosts/example.com/vhconf.conf") {

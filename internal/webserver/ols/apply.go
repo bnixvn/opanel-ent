@@ -29,6 +29,9 @@ func (b *Backend) Apply(ctx context.Context, r webserver.Rendered) error {
 	if err := ensureSuspendedPage(); err != nil {
 		return err
 	}
+	if err := ensureACMEWebroot(); err != nil {
+		return err
+	}
 
 	if err := b.snapshot(); err != nil {
 		return fmt.Errorf("ols: snapshot current config: %w", err)
@@ -104,6 +107,25 @@ var suspendedPage = []byte(`<!doctype html>
 </body>
 </html>
 `)
+
+// ensureACMEWebroot creates the shared challenge directory.
+//
+// It is written by the panel and read by the webserver worker, which runs as a
+// different account, so it is world-readable. The only thing that ever lands
+// here is a challenge token, which is public by design.
+func ensureACMEWebroot() error {
+	dir := filepath.Join(webserver.ACMEWebroot, ".well-known", "acme-challenge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("ols: create ACME webroot: %w", err)
+	}
+	for _, p := range []string{webserver.ACMEWebroot,
+		filepath.Join(webserver.ACMEWebroot, ".well-known"), dir} {
+		if err := os.Chmod(p, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // write puts the rendered files in place and removes managed directories that
 // the render no longer contains, which is how a deleted site's config goes

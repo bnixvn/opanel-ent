@@ -96,7 +96,12 @@ func (s *Server) routes() http.Handler {
 		})
 	})
 
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
+	// Everything outside /api is the user interface.
+	r.Handle("/*", uiHandler())
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		// Only /api reaches here now; a wrong path under it is a client
+		// error worth naming rather than a page to render.
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {

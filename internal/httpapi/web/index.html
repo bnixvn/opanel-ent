@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OPanel</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#16191d; --muted:#6b7280; --line:#e4e7eb;
+    --accent:#2563eb; --accent-ink:#fff; --ok:#0f7b45; --ok-bg:#e6f4ec;
+    --warn:#8a5a00; --warn-bg:#fdf3e0; --bad:#a4262c; --bad-bg:#fbe9ea;
+    --radius:8px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f1115; --panel:#171a20; --ink:#e6e8eb; --muted:#9aa3af; --line:#262b33;
+      --accent:#4b83f0; --ok:#5cc38f; --ok-bg:#12291f; --warn:#e0b060; --warn-bg:#2a2013;
+      --bad:#f08a8f; --bad-bg:#2c1618;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  a{color:var(--accent)}
+  .hidden{display:none !important}
+
+  /* login */
+  #login{min-height:100vh;display:grid;place-items:center;padding:1.5rem}
+  #login .card{width:100%;max-width:22rem}
+  .brand{font-size:1.4rem;font-weight:650;letter-spacing:-.02em;margin:0 0 .25rem}
+  .brand small{font-weight:400;color:var(--muted);font-size:.8rem;display:block;letter-spacing:0}
+
+  /* shell */
+  header{background:var(--panel);border-bottom:1px solid var(--line);
+         padding:.7rem 1.1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  header .brand{font-size:1.05rem;margin:0}
+  nav{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap}
+  nav button{background:none;border:1px solid transparent;color:var(--muted);
+             padding:.35rem .7rem;border-radius:var(--radius);cursor:pointer;font:inherit}
+  nav button:hover{color:var(--ink);background:var(--bg)}
+  nav button[aria-current="page"]{color:var(--ink);background:var(--bg);border-color:var(--line)}
+  .who{color:var(--muted);font-size:.85rem}
+  main{padding:1.1rem;max-width:76rem;margin:0 auto}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+        padding:1.1rem;margin-bottom:1rem}
+  .card h2{margin:0 0 .8rem;font-size:.95rem;font-weight:600}
+  .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:end}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.25rem}
+  input,select{font:inherit;padding:.45rem .55rem;border:1px solid var(--line);
+               border-radius:6px;background:var(--bg);color:var(--ink);min-width:0}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  .field{flex:1 1 10rem}
+  button.act{font:inherit;padding:.45rem .8rem;border-radius:6px;cursor:pointer;
+             border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+  button.act:hover{border-color:var(--muted)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  button.primary:hover{filter:brightness(1.08)}
+  button.danger{color:var(--bad);border-color:var(--bad)}
+  button[disabled]{opacity:.5;cursor:not-allowed}
+
+  table{width:100%;border-collapse:collapse;font-size:.88rem}
+  th{text-align:left;font-weight:600;color:var(--muted);font-size:.78rem;
+     text-transform:uppercase;letter-spacing:.03em;padding:.4rem .5rem;border-bottom:1px solid var(--line)}
+  td{padding:.5rem;border-bottom:1px solid var(--line);vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  .scroll{overflow-x:auto}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em;
+       background:var(--bg);padding:.1em .35em;border-radius:4px}
+
+  .tag{display:inline-block;padding:.1rem .45rem;border-radius:999px;font-size:.75rem;
+       font-weight:500;border:1px solid transparent}
+  .tag.ok{color:var(--ok);background:var(--ok-bg)}
+  .tag.warn{color:var(--warn);background:var(--warn-bg)}
+  .tag.bad{color:var(--bad);background:var(--bad-bg)}
+  .tag.mute{color:var(--muted);background:var(--bg);border-color:var(--line)}
+
+  .msg{padding:.55rem .7rem;border-radius:6px;margin-bottom:.8rem;font-size:.87rem}
+  .msg.err{color:var(--bad);background:var(--bad-bg)}
+  .msg.ok{color:var(--ok);background:var(--ok-bg)}
+  .muted{color:var(--muted)}
+  .empty{color:var(--muted);padding:1rem 0;text-align:center}
+  dl.kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem .9rem;margin:0;font-size:.88rem}
+  dl.kv dt{color:var(--muted)}
+  dl.kv dd{margin:0}
+</style>
+</head>
+<body>
+
+<section id="login">
+  <form class="card" id="loginForm">
+    <h1 class="brand">OPanel <small>hosting control panel</small></h1>
+    <div id="loginMsg"></div>
+    <p><label for="u">Username</label><input id="u" autocomplete="username" required style="width:100%"></p>
+    <p><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required style="width:100%"></p>
+    <p id="codeWrap" class="hidden"><label for="c">Two-factor code</label>
+       <input id="c" inputmode="numeric" autocomplete="one-time-code" style="width:100%"></p>
+    <p><button class="act primary" style="width:100%" type="submit">Sign in</button></p>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <h1 class="brand">OPanel</h1>
+    <nav>
+      <button data-tab="sites" aria-current="page">Sites</button>
+      <button data-tab="php">PHP</button>
+      <button data-tab="system">System</button>
+    </nav>
+    <span class="who" id="who"></span>
+    <button class="act" id="logout">Sign out</button>
+  </header>
+
+  <main>
+    <div id="msg"></div>
+
+    <section data-panel="sites">
+      <div class="card">
+        <h2>New site</h2>
+        <form id="newSite" class="row">
+          <div class="field"><label for="nsDomain">Domain</label>
+            <input id="nsDomain" placeholder="example.com" required style="width:100%"></div>
+          <div class="field"><label for="nsOwner">Owner</label>
+            <select id="nsOwner" style="width:100%"></select></div>
+          <div class="field"><label for="nsType">Type</label>
+            <select id="nsType" style="width:100%">
+              <option value="wordpress">WordPress</option>
+              <option value="php">PHP</option>
+              <option value="static">Static</option>
+            </select></div>
+          <div class="field"><label for="nsPhp">PHP</label>
+            <select id="nsPhp" style="width:100%"></select></div>
+          <div><button class="act primary" type="submit">Create</button></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Sites</h2>
+        <div class="scroll"><table id="sitesTable">
+          <thead><tr><th>Domain</th><th>Owner</th><th>Type</th><th>PHP</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="sitesEmpty">No sites yet.</div>
+      </div>
+    </section>
+
+    <section data-panel="php" class="hidden">
+      <div class="card">
+        <h2>PHP versions <span class="muted" id="phpProvider"></span></h2>
+        <div class="scroll"><table id="phpTable">
+          <thead><tr><th>Version</th><th>Status</th><th>Interpreter</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section data-panel="system" class="hidden">
+      <div class="card">
+        <h2>Host</h2>
+        <dl class="kv" id="hostInfo"></dl>
+      </div>
+      <div class="card">
+        <h2>Services</h2>
+        <div class="scroll"><table id="svcTable">
+          <thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h2>Recent activity</h2>
+        <div class="scroll"><table id="auditTable">
+          <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+let me = null, phpVersions = [], users = [];
+
+async function api(path, opts = {}) {
+  const res = await fetch("/api" + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  let body = null;
+  if (text) { try { body = JSON.parse(text); } catch { body = { error: text }; } }
+  if (!res.ok) {
+    const err = new Error((body && body.error) || res.statusText);
+    err.code = body && body.code;
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+function note(where, text, kind = "err") {
+  const el = $(where);
+  if (!text) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="msg ${kind}"></div>`;
+  el.firstChild.textContent = text;
+  if (kind === "ok") setTimeout(() => { if (el.firstChild) el.innerHTML = ""; }, 4000);
+}
+
+function tag(text, kind) { return `<span class="tag ${kind}">${text}</span>`; }
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ---------- login ---------- */
+
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  note("#loginMsg", "");
+  try {
+    await api("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: $("#u").value.trim(),
+        password: $("#p").value,
+        code: $("#c").value.trim() || undefined,
+      }),
+    });
+    await start();
+  } catch (err) {
+    if (err.code === "totp_required") {
+      $("#codeWrap").classList.remove("hidden");
+      $("#c").focus();
+      note("#loginMsg", "Enter the six-digit code from your authenticator.", "ok");
+      return;
+    }
+    note("#loginMsg", err.message);
+  }
+});
+
+$("#logout").addEventListener("click", async () => {
+  try { await api("/auth/logout", { method: "POST", body: "{}" }); } catch {}
+  location.reload();
+});
+
+/* ---------- tabs ---------- */
+
+$$("nav button").forEach(b => b.addEventListener("click", () => {
+  $$("nav button").forEach(x => x.removeAttribute("aria-current"));
+  b.setAttribute("aria-current", "page");
+  $$("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
+  if (b.dataset.tab === "system") loadSystem();
+}));
+
+/* ---------- sites ---------- */
+
+async function loadSites() {
+  const { sites } = await api("/sites");
+  const tb = $("#sitesTable tbody");
+  tb.innerHTML = "";
+  $("#sitesEmpty").classList.toggle("hidden", sites.length > 0);
+  $("#sitesTable").classList.toggle("hidden", sites.length === 0);
+
+  for (const s of sites) {
+    const tr = document.createElement("tr");
+    const phpCell = s.app_type === "static"
+      ? '<span class="muted">—</span>'
+      : `<select data-php="${s.id}">${phpVersions.filter(v => v.installed)
+          .map(v => `<option${v.version === s.php_version ? " selected" : ""}>${v.version}</option>`)
+          .join("")}</select>`;
+    tr.innerHTML =
+      `<td><code>${esc(s.domain)}</code>${s.aliases.length
+        ? `<br><span class="muted" style="font-size:.8em">${s.aliases.map(esc).join(", ")}</span>` : ""}</td>` +
+      `<td>${esc(s.owner)}</td>` +
+      `<td>${esc(s.app_type)}</td>` +
+      `<td>${phpCell}</td>` +
+      `<td>${s.suspended ? tag("suspended", "warn") : tag("active", "ok")}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        `<button class="act" data-suspend="${s.id}" data-to="${s.suspended ? 0 : 1}">` +
+          `${s.suspended ? "Unsuspend" : "Suspend"}</button> ` +
+        `<button class="act danger" data-del="${s.id}" data-domain="${esc(s.domain)}">Delete</button>` +
+      `</td>`;
+    tb.appendChild(tr);
+  }
+
+  $$("[data-php]", tb).forEach(sel => sel.addEventListener("change", async () => {
+    await guard(() => api("/sites/" + sel.dataset.php, {
+      method: "PATCH", body: JSON.stringify({ php_version: sel.value }),
+    }), `PHP set to ${sel.value}`);
+  }));
+  $$("[data-suspend]", tb).forEach(b => b.addEventListener("click", () =>
+    guard(() => api("/sites/" + b.dataset.suspend, {
+      method: "PATCH", body: JSON.stringify({ suspended: b.dataset.to === "1" }),
+    }), b.dataset.to === "1" ? "Site suspended" : "Site unsuspended")));
+  $$("[data-del]", tb).forEach(b => b.addEventListener("click", () => {
+    if (!confirm(`Delete ${b.dataset.domain}?\n\nThis also deletes the site's files and cannot be undone.`)) return;
+    guard(() => api(`/sites/${b.dataset.del}?remove_files=true`, { method: "DELETE" }), "Site deleted");
+  }));
+}
+
+async function guard(fn, okMsg) {
+  note("#msg", "");
+  try { await fn(); note("#msg", okMsg, "ok"); }
+  catch (err) { note("#msg", err.message); }
+  await loadSites();
+}
+
+$("#newSite").addEventListener("submit", async e => {
+  e.preventDefault();
+  const type = $("#nsType").value;
+  const body = {
+    domain: $("#nsDomain").value.trim(),
+    app_type: type,
+    owner_id: Number($("#nsOwner").value) || undefined,
+  };
+  if (type !== "static") body.php_version = $("#nsPhp").value;
+  note("#msg", "");
+  try {
+    await api("/sites", { method: "POST", body: JSON.stringify(body) });
+    $("#nsDomain").value = "";
+    note("#msg", `Created ${body.domain}`, "ok");
+  } catch (err) { note("#msg", err.message); }
+  await loadSites();
+});
+
+$("#nsType").addEventListener("change", () =>
+  $("#nsPhp").disabled = $("#nsType").value === "static");
+
+/* ---------- php ---------- */
+
+async function loadPHP() {
+  const res = await api("/php/versions");
+  phpVersions = res.versions;
+  $("#phpProvider").textContent = "provider: " + res.provider;
+
+  const sel = $("#nsPhp");
+  sel.innerHTML = phpVersions.filter(v => v.installed)
+    .map(v => `<option${v.version === "8.4" ? " selected" : ""}>${v.version}</option>`).join("");
+
+  const tb = $("#phpTable tbody");
+  tb.innerHTML = "";
+  for (const v of phpVersions) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><strong>PHP ${v.version}</strong></td>` +
+      `<td>${v.installed ? tag("installed", "ok") : tag("not installed", "mute")}</td>` +
+      `<td>${v.lsapi_path ? `<code>${esc(v.lsapi_path)}</code>` : '<span class="muted">—</span>'}</td>` +
+      `<td style="text-align:right">${me.role === "admin"
+        ? (v.installed
+            ? `<button class="act danger" data-phpdel="${v.version}">Uninstall</button>`
+            : `<button class="act" data-phpadd="${v.version}">Install</button>`)
+        : ""}</td>`;
+    tb.appendChild(tr);
+  }
+  $$("[data-phpadd]", tb).forEach(b => b.addEventListener("click", () =>
+    phpAction(b, `/php/versions/${b.dataset.phpadd}/install`, "POST",
+      `Installing PHP ${b.dataset.phpadd} — this downloads packages and may take a minute.`)));
+  $$("[data-phpdel]", tb).forEach(b => b.addEventListener("click", () =>
+    phpAction(b, `/php/versions/${b.dataset.phpdel}`, "DELETE",
+      `Removing PHP ${b.dataset.phpdel}.`)));
+}
+
+async function phpAction(btn, path, method, busy) {
+  note("#msg", busy, "ok");
+  btn.disabled = true;
+  try { await api(path, { method }); note("#msg", "Done", "ok"); }
+  catch (err) { note("#msg", err.message); }
+  btn.disabled = false;
+  await loadPHP();
+  await loadSites();
+}
+
+/* ---------- system ---------- */
+
+async function loadSystem() {
+  if (me.role !== "admin") return;
+  try {
+    const info = await api("/system/info");
+    $("#hostInfo").innerHTML =
+      `<dt>Panel</dt><dd><code>${esc(info.panel_version)}</code></dd>` +
+      `<dt>Host</dt><dd>${esc(info.distro.pretty)}</dd>` +
+      `<dt>CloudLinux</dt><dd>${info.distro.cloudlinux
+        ? tag(esc(info.distro.cl_edition || "yes"), "ok") : tag("no", "mute")}</dd>` +
+      `<dt>Webserver</dt><dd>${esc(info.webserver_backend)}</dd>` +
+      `<dt>PHP provider</dt><dd>${esc(info.php_provider || "auto")}</dd>`;
+
+    const { units } = await api("/system/services");
+    const tb = $("#svcTable tbody");
+    tb.innerHTML = "";
+    for (const u of units) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td><code>${esc(u.unit)}</code></td>` +
+        `<td>${u.active === "active" ? tag("active", "ok") : tag(esc(u.active), "bad")}</td>` +
+        `<td class="muted">${esc(u.enabled)}</td>` +
+        `<td style="text-align:right"><button class="act" data-restart="${esc(u.unit)}">Restart</button></td>`;
+      tb.appendChild(tr);
+    }
+    $$("[data-restart]", tb).forEach(b => b.addEventListener("click", async () => {
+      // Restarting the API would drop this very request; the panel would look
+      // broken when it is in fact doing exactly what was asked.
+      if (b.dataset.restart === "opanel-api" &&
+          !confirm("Restarting opanel-api will briefly disconnect this page. Continue?")) return;
+      b.disabled = true;
+      try {
+        await api(`/system/services/${b.dataset.restart}/restart`, { method: "POST" });
+        note("#msg", `${b.dataset.restart} restarted`, "ok");
+      } catch (err) { note("#msg", err.message); }
+      b.disabled = false;
+      loadSystem();
+    }));
+
+    const { entries } = await api("/system/audit?limit=25");
+    const at = $("#auditTable tbody");
+    at.innerHTML = "";
+    for (const e of entries) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td class="muted">${new Date(e.at).toLocaleString()}</td>` +
+        `<td>${esc(e.actor_name || e.actor_type)}</td>` +
+        `<td><code>${esc(e.action)}</code></td>` +
+        `<td>${esc(e.target) || '<span class="muted">—</span>'}</td>` +
+        `<td>${e.ok ? tag("ok", "ok") : tag("failed", "bad")}</td>`;
+      at.appendChild(tr);
+    }
+  } catch (err) { note("#msg", err.message); }
+}
+
+/* ---------- boot ---------- */
+
+async function loadOwners() {
+  // There is no users endpoint yet, so the owner list is derived from the
+  // sites that already exist plus the signed-in account. Phase 5 replaces
+  // this with a real listing.
+  const sel = $("#nsOwner");
+  const seen = new Map([[me.id, me.username]]);
+  try {
+    const { sites } = await api("/sites");
+    for (const s of sites) seen.set(s.owner_id, s.owner);
+  } catch {}
+  sel.innerHTML = [...seen].map(([id, name]) =>
+    `<option value="${id}"${id === me.id ? " selected" : ""}>${esc(name)}</option>`).join("");
+}
+
+async function start() {
+  me = await api("/auth/me");
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  $("#who").textContent = `${me.username} · ${me.role}`;
+  await loadPHP();
+  await loadOwners();
+  await loadSites();
+}
+
+(async () => {
+  try { await start(); }
+  catch { $("#login").classList.remove("hidden"); $("#u").focus(); }
+})();
+</script>
+</body>
+</html>

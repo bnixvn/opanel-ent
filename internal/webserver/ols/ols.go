@@ -107,6 +107,8 @@ type siteView struct {
 	// interpreter at all.
 	ServePHP bool
 
+	ACMEWebroot string
+
 	MaxConns      int
 	MemSoftLimit  string
 	MemHardLimit  string
@@ -123,6 +125,15 @@ type mainView struct {
 	HasSSL          bool
 	DefaultCertFile string
 	DefaultKeyFile  string
+
+	ACMEVhostName     string
+	ACMEWebroot       string
+	ACMEConfigFileRel string
+}
+
+// acmeVhostConfPath is where the catch-all vhost's own config lives.
+func (b *Backend) acmeVhostConfPath() string {
+	return path.Join(b.managedDir, "vhosts", webserver.ACMEVhostName, "vhconf.conf")
 }
 
 // vhostName is the block name for a site.
@@ -200,6 +211,7 @@ func (b *Backend) newSiteView(cfg webserver.ServerConfig, s webserver.Site) site
 	return siteView{
 		EffectiveDocRoot: docRoot,
 		ServePHP:         s.NeedsPHP() && !s.Suspended,
+		ACMEWebroot:      webserver.ACMEWebroot,
 		Site:             s,
 		Config:           cfg,
 		Name:             vhostName(s.Domain),
@@ -246,7 +258,12 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 		}
 	}
 
-	mv := mainView{Config: cfg, Sites: views, SSLSites: sslViews, HasSSL: len(sslViews) > 0}
+	mv := mainView{
+		Config: cfg, Sites: views, SSLSites: sslViews, HasSSL: len(sslViews) > 0,
+		ACMEVhostName:     webserver.ACMEVhostName,
+		ACMEWebroot:       webserver.ACMEWebroot,
+		ACMEConfigFileRel: b.configFileRel(b.acmeVhostConfPath()),
+	}
 	if mv.HasSSL {
 		// OpenLiteSpeed needs a certificate on the listener itself; per-site
 		// certificates are then selected by SNI from each vhssl block. Any
@@ -260,6 +277,16 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 		return out, err
 	}
 	out.Main = webserver.File{Path: b.confPath, Content: main, Mode: fileMode}
+
+	// The catch-all is rendered like any other vhost so it is covered by the
+	// same prune, ownership and rollback handling.
+	acmeContent, err := b.execute("acme_vhconf.conf.tmpl", mv)
+	if err != nil {
+		return out, err
+	}
+	acmePath := b.acmeVhostConfPath()
+	out.Vhosts = append(out.Vhosts, webserver.File{Path: acmePath, Content: acmeContent, Mode: fileMode})
+	out.VhostDirs = append(out.VhostDirs, path.Dir(acmePath))
 
 	for _, v := range views {
 		content, err := b.execute("vhconf.conf.tmpl", v)

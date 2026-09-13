@@ -4,13 +4,23 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path"
+	"strconv"
 	"strings"
 
+	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
+)
+
+// Certificate storage. The account key lives apart from the certificates so
+// the two can have different permissions and different backup treatment.
+const (
+	CertStateDir = "/var/lib/opanel/acme"
+	CertDir      = "/var/lib/opanel/ssl"
 )
 
 // --- Linux accounts -------------------------------------------------------
@@ -219,6 +229,34 @@ type PHPListResult struct {
 	Versions []phpmgr.Version `json:"versions"`
 }
 
+// --- certificates ---------------------------------------------------------
+
+// CertIssueRequest asks for a certificate covering one or more hostnames.
+type CertIssueRequest struct {
+	Domains []string `json:"domains"`
+	Email   string   `json:"email"`
+	// Staging targets Let's Encrypt's test CA. The result is not trusted by
+	// browsers, but production rate limits are per registered domain per week
+	// and a debugging loop will exhaust them.
+	Staging bool `json:"staging"`
+}
+
+// Validate checks the request shape.
+func (r *CertIssueRequest) Validate() error {
+	if len(r.Domains) == 0 {
+		return fmt.Errorf("at least one domain is required")
+	}
+	for _, d := range r.Domains {
+		if !webserver.ValidDomain(d) {
+			return fmt.Errorf("domain %q is not a valid hostname", d)
+		}
+	}
+	// An empty contact is allowed by ACME and by this action. It costs the
+	// expiry warnings Let's Encrypt would otherwise send, so the caller is
+	// expected to know what it is giving up.
+	return nil
+}
+
 // --- registration ---------------------------------------------------------
 
 func registerSites(r *agent.Registry, deps Deps) {
@@ -285,6 +323,68 @@ func registerSites(r *agent.Registry, deps Deps) {
 	agent.Register(r, "php.uninstall", 1, func(ctx context.Context, in PHPVersionRequest) (struct{}, error) {
 		return struct{}{}, deps.PHP.Uninstall(ctx, in.Version)
 	})
+
+	agent.Register(r, "cert.issue", 1, func(ctx context.Context, in CertIssueRequest) (acme.Certificate, error) {
+		m := &acme.Manager{
+			StateDir: CertStateDir,
+			CertDir:  CertDir,
+			Webroot:  webserver.ACMEWebroot,
+			Email:    in.Email,
+			CADirURL: acme.ProductionCA,
+		}
+		if in.Staging {
+			m.CADirURL = acme.StagingCA
+		}
+		cert, err := m.Issue(ctx, in.Domains)
+		if err != nil {
+			return acme.Certificate{}, err
+		}
+		// The agent writes these as root, but the API reads its own
+		// certificate as the unprivileged service account. Without this the
+		// panel starts, fails to load the key, and reports nothing more
+		// helpful than a permission error at boot.
+		if err := grantPanelAccess(cert.CertFile, cert.KeyFile); err != nil {
+			return acme.Certificate{}, err
+		}
+		return *cert, nil
+	})
+}
+
+// PanelServiceUser is the account opanel-api runs as.
+const PanelServiceUser = "opanel"
+
+// grantPanelAccess lets the unprivileged API read a certificate it did not
+// write. Group-readable rather than world: the private key stays off limits
+// to site owners, who share the host.
+func grantPanelAccess(certFile, keyFile string) error {
+	u, err := user.Lookup(PanelServiceUser)
+	if err != nil {
+		return fmt.Errorf("look up %q: %w", PanelServiceUser, err)
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return err
+	}
+	for _, p := range []struct {
+		path string
+		mode os.FileMode
+	}{
+		{path.Dir(certFile), 0o750},
+		{certFile, 0o644},
+		{keyFile, 0o640},
+	} {
+		if err := os.Chown(p.path, uid, gid); err != nil {
+			return fmt.Errorf("chown %s: %w", p.path, err)
+		}
+		if err := os.Chmod(p.path, p.mode); err != nil {
+			return fmt.Errorf("chmod %s: %w", p.path, err)
+		}
+	}
+	return nil
 }
 
 // provisionSite creates the directory tree and a placeholder page.

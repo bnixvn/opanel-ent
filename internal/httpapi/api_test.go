@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -326,4 +327,56 @@ func TestLoginRejectsUnknownField(t *testing.T) {
 		t.Fatalf("unknown field returned %d, want 400", resp.StatusCode)
 	}
 	decode(t, resp, nil)
+}
+
+func TestUIIsServed(t *testing.T) {
+	f := newFixture(t)
+
+	// The interface is embedded in the binary, so it must be reachable
+	// without any files on disk.
+	resp, err := http.Get(f.srv.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET / returned %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("GET / content type = %q, want text/html", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("<title>OPanel</title>")) {
+		t.Fatal("the served page is not the panel interface")
+	}
+}
+
+func TestDeepLinkFallsBackToTheUI(t *testing.T) {
+	// A refresh on a client-side route must render the page, not 404.
+	f := newFixture(t)
+	resp, err := http.Get(f.srv.URL + "/sites")
+	if err != nil {
+		t.Fatalf("GET /sites: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /sites returned %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestAPIStillReturnsJSONFor404(t *testing.T) {
+	// The catch-all must not swallow unknown API paths and hand back HTML,
+	// which would leave a client parsing a web page as an error response.
+	f := newFixture(t)
+	resp, err := http.Get(f.srv.URL + "/api/nope")
+	if err != nil {
+		t.Fatalf("GET /api/nope: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("returned %d, want 404", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("content type = %q, want application/json", ct)
+	}
 }

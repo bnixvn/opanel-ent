@@ -99,6 +99,13 @@ context / {
     addDefaultCharset         off
 }
 {{- end }}
+
+# Certificate renewals must keep working while the site is live, and while it
+# is suspended: a suspension is not a reason to let the certificate lapse.
+context /.well-known/acme-challenge {
+    location                  {{ .ACMEWebroot }}/.well-known/acme-challenge
+    allowBrowse               1
+}
 {{- if and .RewriteRules (not .Site.Suspended) }}
 rewrite {
     enable                    1

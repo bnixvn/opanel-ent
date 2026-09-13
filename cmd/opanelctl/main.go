@@ -11,11 +11,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
@@ -41,6 +43,8 @@ Usage:
   opanelctl user create-admin <name>    create an administrator
   opanelctl user create <name> <role>   create a user (admin|reseller|end_user)
   opanelctl user list                   list panel users
+  opanelctl cert issue <domain> [email] obtain a Let's Encrypt certificate
+                       [--staging] [--panel]
 
 Environment: OPANEL_DB_PATH, OPANEL_AGENT_SOCKET, OPANEL_DATA_DIR
 `
@@ -80,6 +84,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return cmdService(ctx, args[1:])
 	case "user":
 		return cmdUser(ctx, args[1:])
+	case "cert":
+		return cmdCert(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q (try: opanelctl -h)", args[0])
 	}
@@ -137,6 +143,71 @@ func cmdInstall(ctx context.Context, args []string) error {
 	fmt.Println("The API listens on 127.0.0.1 by default. To reach it from outside, set")
 	fmt.Printf("OPANEL_LISTEN=0.0.0.0:%d in %s/opanel.env and restart opanel-api,\n", opts.PanelPort, installer.ConfigDir)
 	fmt.Println("and make sure your provider's firewall allows 80, 443 and that port.")
+	return nil
+}
+
+func cmdCert(ctx context.Context, args []string) error {
+	if len(args) < 1 || args[0] != "issue" {
+		return errors.New("cert: want 'issue <domain> <email> [--staging] [--panel]'")
+	}
+	fs := flag.NewFlagSet("cert issue", flag.ContinueOnError)
+	staging := fs.Bool("staging", false, "use the Let's Encrypt staging CA")
+	panel := fs.Bool("panel", false, "point the panel's own TLS at this certificate")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) < 1 {
+		return errors.New("cert issue: want <domain> [email]")
+	}
+	domain := rest[0]
+	var email string
+	if len(rest) > 1 {
+		email = rest[1]
+	} else {
+		fmt.Println("No contact email given. Let's Encrypt will not be able to warn")
+		fmt.Println("you before this certificate expires; pass one to enable that.")
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	ac := agentclient.New(cfg.AgentSocket, 5*time.Minute)
+
+	fmt.Printf("Requesting a certificate for %s ...\n", domain)
+	cert, err := agentclient.Call[acme.Certificate](ctx, ac, "cert.issue", 1,
+		actions.CertIssueRequest{Domains: rest[:1], Email: email, Staging: *staging})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Issued, valid until %s\n", cert.NotAfter.Format(time.RFC1123))
+	fmt.Printf("  certificate %s\n", cert.CertFile)
+	fmt.Printf("  private key %s\n", cert.KeyFile)
+
+	if !*panel {
+		return nil
+	}
+	// Written as a drop-in rather than edited into the existing file, so
+	// re-running this never duplicates or mangles an operator's own settings.
+	envPath := filepath.Join(installer.ConfigDir, "opanel.env")
+	line := fmt.Sprintf(
+		"\n# Set by 'opanelctl cert issue --panel' on %s\n"+
+			"OPANEL_TLS_CERT=%s\nOPANEL_TLS_KEY=%s\nOPANEL_PANEL_HOST=%s\n",
+		time.Now().Format(time.RFC3339), cert.CertFile, cert.KeyFile, domain)
+	f, err := os.OpenFile(envPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", envPath, err)
+	}
+	if _, err := f.WriteString(line); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("Recorded in %s. Restart the panel to use it:\n", envPath)
+	fmt.Println("  systemctl restart opanel-api")
 	return nil
 }
 

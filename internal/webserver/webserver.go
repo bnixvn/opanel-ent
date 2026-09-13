@@ -226,6 +226,19 @@ func DefaultServerConfig() ServerConfig {
 // 403 instead of the notice.
 const SuspendedRoot = "/usr/share/opanel/suspended"
 
+// ACMEWebroot is the shared directory HTTP-01 challenges are served from.
+//
+// One directory for every domain on the host. The alternative -- a challenge
+// path inside each site's own document root -- would put the panel's files
+// inside a customer's tree and break the moment they deploy something that
+// rewrites every request to a front controller.
+const ACMEWebroot = "/usr/share/opanel/acme"
+
+// ACMEVhostName is the catch-all vhost that answers challenges for hostnames
+// no site claims yet -- which is every hostname at the moment its first
+// certificate is issued.
+const ACMEVhostName = "_acme"
+
 // File is one rendered configuration file.
 type File struct {
 	Path    string

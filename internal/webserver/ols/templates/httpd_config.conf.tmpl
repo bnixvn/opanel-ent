@@ -149,12 +149,25 @@ virtualHost {{ .Name }} {
     configFile                   {{ .ConfigFileRel }}
 }
 {{ end }}
+# Answers hostnames no site claims. Without it a certificate could never be
+# issued for a domain before its site exists, which is the usual order.
+virtualHost {{ .ACMEVhostName }} {
+    vhRoot                       {{ .ACMEWebroot }}
+    allowSymbolLink              0
+    enableScript                 0
+    restrained                   1
+    setUIDMode                   0
+    chrootMode                   0
+    configFile                   {{ .ACMEConfigFileRel }}
+}
+
 listener opanel_http {
     address                      *:{{ .Config.HTTPPort }}
     secure                       0
 {{- range .Sites }}
     map                          {{ .Name }} {{ .MapDomains }}
 {{- end }}
+    map                          {{ .ACMEVhostName }} *
 }
 {{ if .HasSSL }}
 listener opanel_https {
