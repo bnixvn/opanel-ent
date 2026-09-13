@@ -445,11 +445,23 @@ Provider chỉ mở cổng 22. Đo được: 80/443 trả `filtered` kể cả k
 - **Token API không parse được.** `randomToken` dùng base64url, bảng chữ có `_`, nên `strings.Split(plain, "_")` vỡ khi prefix hoặc secret chứa ký tự đó. Sửa: prefix dùng hex, secret giữ base64url, tách bằng `SplitN(..., 3)`.
 - **API không kết nối được agent socket** (`connect: permission denied`). Hai nguyên nhân chồng nhau: `BindReadOnlyPaths` làm socket chỉ đọc trong khi `connect()` cần quyền ghi trên inode, và `RuntimeDirectory` được systemd tạo theo User/Group của unit nên ra `root:root` — group `opanel` không đi vào được thư mục. Sửa: `ReadWritePaths=/run/opanel`, `Group=opanel` trên unit agent, và agent tự `chown` thư mục trong `Listen()` để chạy tay lúc cứu hộ vẫn đúng.
 
-### Phase 2 — Website chạy được *(2 tuần)* ← milestone quan trọng nhất
+### ~~Phase 2 — Website chạy được~~ ✅ XONG 2026-09-14
 
-Panel user ↔ linux user ↔ SFTP; sites CRUD; **webserver interface + backend OLS**; **phpmgr + provider lsphp**; template OLS port từ Jinja2; `opanelctl install` cài được AlmaLinux 10 + OLS + lsphp từ đầu.
+7.583 dòng code + 1.541 dòng test. Cổng ra đã đạt và vượt: tạo user, tạo site PHP, truy cập thấy trang chạy, đổi PHP version thấy đổi theo — cộng thêm suspend/unsuspend, xoá site dọn sạch config, phân quyền theo chủ sở hữu, SFTP chroot, và rollback khi apply hỏng.
 
-**Cổng ra:** cài sạch một VPS AlmaLinux 10 bằng một lệnh, tạo user, tạo site PHP, truy cập bằng IP thấy trang chạy, đổi PHP version thấy `phpinfo()` đổi theo.
+Đã có: `internal/webserver` (interface + backend OLS + golden test), `internal/phpmgr` (interface + provider lsphp), `internal/sites` (vòng đời site), `internal/platform/linuxuser`, `internal/installer` (13 bước idempotent), 11 agent action mới, API `/sites` và `/php/versions`.
+
+**Năm phát hiện trên máy thật, mỗi cái đều đổi thiết kế:**
+
+1. **OLS không có `include`.** Nó nhận dòng `include` mà không báo gì rồi lặng lẽ bỏ qua — vhost không được phục vụ, port không mở. Nên panel phải full-render `httpd_config.conf`. (Đúng như plan dự kiến, nhưng giờ là đã đo chứ không phải đoán.)
+2. **Thư mục site phải là 0711, không phải 0750.** Worker của OLS chạy dưới tài khoản riêng chứ không phải chủ site, nên phải traverse vào được. 0750 cho 403 ở mọi request.
+3. **Tên external processor phải mang PHP version.** Tên cố định ⇒ socket không đổi ⇒ graceful reload giữ nguyên tiến trình lsphp cũ ⇒ site báo version cũ mãi mãi. Đổi 8.4 sang 8.1 im lặng không có tác dụng cho tới khi version vào tên.
+4. **Trang suspend không đặt được dưới `/var/lib/opanel`** — đó là state riêng của panel, mode 0750, worker không với tới. Chuyển sang `/usr/share/opanel`.
+5. **Home của site owner phải là `root:<user> 0751`.** Ba ràng buộc cùng lúc: sshd từ chối `ChrootDirectory` không thuộc root hoặc group/other ghi được; worker webserver phải traverse; chủ sở hữu phải liệt kê được home của mình — 0711 cho "permission denied" ngay ở lệnh `ls` đầu tiên.
+
+**Nhất quán khi hỏng:** backend snapshot config đang chạy, rollback + reload nếu config test hoặc reload thất bại; tầng service khôi phục cả hàng trong DB, để bản ghi và config đang phục vụ không lệch nhau. Đã kiểm bằng cách ép `lswsctrl` hỏng — config quay về bản cũ và site vẫn trả 200.
+
+**Còn nợ sang Phase 3:** WordPress installer + WP-CLI (đã lên lịch Phase 3), và `opanelctl install` chưa được thử trên máy hoàn toàn trắng — mới thử idempotent trên máy đã cấu hình.
 
 ### Phase 3 — Hạ tầng vận hành *(2 tuần)*
 
