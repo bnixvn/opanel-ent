@@ -235,6 +235,20 @@ dl.kv dd { margin: 0; }
 .check { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; }
 .check input { width: auto; margin: 0; }
 
+/* Command output: WP-CLI, a scan report, a log tail. */
+pre.log {
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: var(--bg);
+  padding: 0.7rem;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* The file manager's selection bar, shown only when something is selected. */
 .selbar {
   display: flex;

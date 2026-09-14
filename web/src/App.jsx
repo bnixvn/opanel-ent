@@ -4,6 +4,7 @@ import { api, setUnauthorizedHandler } from './api.js';
 import Login from './Login.jsx';
 import Sites from './pages/Sites.jsx';
 import Databases from './pages/Databases.jsx';
+import WordPress from './pages/WordPress.jsx';
 import Files from './pages/Files.jsx';
 import Backups from './pages/Backups.jsx';
 import Ssl from './pages/Ssl.jsx';
@@ -23,6 +24,7 @@ const MENU = [
   { group: '', items: [
     { to: '/', label: 'Websites', end: true },
     { to: '/databases', label: 'Databases' },
+    { to: '/wordpress', label: 'WordPress' },
     { to: '/files', label: 'File manager' },
     { to: '/backups', label: 'Backups' },
     { to: '/ssl', label: 'SSL' },
@@ -191,6 +193,7 @@ export default function App() {
             <Route path="/" element={<Sites me={me} />} />
             <Route path="/sites/*" element={<Sites me={me} />} />
             <Route path="/databases" element={<Databases me={me} />} />
+            <Route path="/wordpress" element={<WordPress me={me} />} />
             <Route path="/files" element={<Files me={me} />} />
             <Route path="/backups" element={<Backups me={me} />} />
             <Route path="/ssl" element={<Ssl me={me} />} />

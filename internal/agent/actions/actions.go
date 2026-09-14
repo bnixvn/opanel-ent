@@ -46,6 +46,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerFilesPlus(r)
 	registerBackup(r)
 	registerWordPress(r, deps)
+	registerWPManage(r, deps)
 }
 
 // PingResult is the reply to "ping".

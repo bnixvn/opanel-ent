@@ -123,6 +123,11 @@ type WPInstallResult struct {
 type WPPathRequest struct {
 	Owner        string `json:"owner"`
 	DocumentRoot string `json:"document_root"`
+	// PHPVersion is the interpreter WP-CLI should run under: the site's own,
+	// so a plugin that needs an older PHP behaves in the manager the way it
+	// behaves when the site is served. Optional -- an empty value falls back
+	// to the newest installed version.
+	PHPVersion string `json:"php_version,omitempty"`
 }
 
 // Validate checks the account and that the root is inside its home.

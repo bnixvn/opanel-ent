@@ -44,7 +44,10 @@ func New(database *db.DB, ac *agentclient.Client, dbSvc *databases.Service, log 
 // Status reports what is in a site's document root.
 func (s *Service) Status(ctx context.Context, site *db.Site) (actions.WPStatus, error) {
 	return agentclient.Call[actions.WPStatus](ctx, s.agent, "wp.status", 1,
-		actions.WPPathRequest{Owner: site.OwnerUsername, DocumentRoot: site.DocumentRoot})
+		actions.WPPathRequest{
+			Owner: site.OwnerUsername, DocumentRoot: site.DocumentRoot,
+			PHPVersion: site.PHPVersion,
+		})
 }
 
 // Request describes an install.
@@ -246,4 +249,31 @@ func dbSuffix(domain string) string {
 		out = out[:16]
 	}
 	return out
+}
+
+// Info collects everything the WordPress manager shows about one site.
+func (s *Service) Info(ctx context.Context, site *db.Site) (actions.WPInfo, error) {
+	return agentclient.Call[actions.WPInfo](ctx, s.slow, "wp.info", 1,
+		actions.WPPathRequest{
+			Owner: site.OwnerUsername, DocumentRoot: site.DocumentRoot,
+			PHPVersion: site.PHPVersion,
+		})
+}
+
+// Manage runs one update or state change against a site's WordPress.
+func (s *Service) Manage(ctx context.Context, site *db.Site, kind, op, name string) (actions.WPActionResult, error) {
+	return agentclient.Call[actions.WPActionResult](ctx, s.slow, "wp.manage", 1,
+		actions.WPActionRequest{
+			Owner: site.OwnerUsername, DocumentRoot: site.DocumentRoot,
+			PHPVersion: site.PHPVersion, Kind: kind, Op: op, Name: name,
+		})
+}
+
+// SignOn mints a one-click link into a site's wp-admin.
+func (s *Service) SignOn(ctx context.Context, site *db.Site) (actions.WPSSOResult, error) {
+	return agentclient.Call[actions.WPSSOResult](ctx, s.slow, "wp.sso", 1,
+		actions.WPPathRequest{
+			Owner: site.OwnerUsername, DocumentRoot: site.DocumentRoot,
+			PHPVersion: site.PHPVersion,
+		})
 }
