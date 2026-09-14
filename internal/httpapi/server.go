@@ -16,6 +16,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/filemanager"
+	"github.com/bnixvn/opanel-ent/internal/malware"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/security"
@@ -37,6 +38,7 @@ type Server struct {
 	backups   *backups.Service
 	wordpress *wordpress.Service
 	firewall  *security.Firewall
+	malware   *malware.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -46,7 +48,7 @@ type Server struct {
 // New builds the API server and its route table.
 func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service, fileSvc *filemanager.Service,
 	backupSvc *backups.Service, wpSvc *wordpress.Service, fwSvc *security.Firewall,
-	log *slog.Logger) *Server {
+	malwareSvc *malware.Service, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -63,6 +65,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		backups:   backupSvc,
 		wordpress: wpSvc,
 		firewall:  fwSvc,
+		malware:   malwareSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -180,6 +183,12 @@ func (s *Server) routes() http.Handler {
 			// visitors' addresses and the paths they asked for.
 			pr.Get("/logs", s.handleLogTail)
 			pr.Get("/logs/download", s.handleLogDownload)
+			pr.Get("/malware", s.handleMalwareStatus)
+			pr.Post("/malware/scan", s.handleMalwareScan)
+			pr.Get("/malware/scans/{id}", s.handleMalwareScanGet)
+			pr.Post("/malware/findings/{id}", s.handleMalwareAct)
+			pr.Put("/malware/schedule", s.handleMalwareSchedule)
+			pr.Delete("/malware/schedule", s.handleMalwareSchedule)
 			pr.Get("/notifications", s.handleNotificationGet)
 			pr.Put("/notifications", s.handleNotificationSet)
 
@@ -264,6 +273,8 @@ func (s *Server) routes() http.Handler {
 				ar.Get("/waf/events", s.handleWAFEvents)
 				ar.Post("/sites/{id}/waf", s.handleSiteWAF)
 
+				ar.Post("/malware/install", s.handleMalwareInstall)
+				ar.Post("/malware/update", s.handleMalwareUpdate)
 				ar.Post("/phpmyadmin/install", s.handlePMAInstall)
 				ar.Get("/certificates", s.handleCertList)
 				ar.Delete("/certificates", s.handleCertDelete)
@@ -331,6 +342,7 @@ func (s *Server) StartBackgroundTasks(ctx context.Context) {
 	go s.backupScheduleLoop(ctx)
 	go s.blocklistRefreshLoop(ctx)
 	go s.sweepSSOAccounts(ctx)
+	go s.malwareScheduleLoop(ctx)
 }
 
 // blocklistRefreshLoop re-fetches the firewall's subscribed blocklists.
