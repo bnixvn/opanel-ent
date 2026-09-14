@@ -57,11 +57,11 @@ func TestSafeEntryNameKeepsOrdinaryNames(t *testing.T) {
 
 func TestArchiveFormat(t *testing.T) {
 	ok := map[string]string{
-		"backup.zip":          "zip",
-		"BACKUP.ZIP":          "zip",
-		"site.tar.gz":         "tar.gz",
-		"site.tgz":            "tar.gz",
-		"site.tar":            "tar",
+		"backup.zip":           "zip",
+		"BACKUP.ZIP":           "zip",
+		"site.tar.gz":          "tar.gz",
+		"site.tgz":             "tar.gz",
+		"site.tar":             "tar",
 		"a/b/c/archive.tar.gz": "tar.gz",
 	}
 	for name, want := range ok {
@@ -112,7 +112,7 @@ func TestCopyRefusesRecursion(t *testing.T) {
 func TestArchiveRequestValidation(t *testing.T) {
 	t.Run("nothing selected", func(t *testing.T) {
 		req := &FileArchiveRequest{Owner: "alice", Dest: "out.zip"}
-		if err := req.Validate() ; err == nil {
+		if err := req.Validate(); err == nil {
 			t.Fatal("an empty selection was accepted")
 		}
 	})

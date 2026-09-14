@@ -85,6 +85,12 @@ func (s *Server) routes() http.Handler {
 		// Unauthenticated.
 		api.Get("/health", s.handleHealth)
 		api.Post("/auth/login", s.handleLogin)
+		// Passkey sign-in. Unauthenticated by necessity -- the assertion is
+		// the credential -- and rate limited like the password form.
+		api.Post("/auth/passkey/login/start", s.handlePasskeyLoginStart)
+		api.Post("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
+		// The login page needs to know whether to offer the button at all.
+		api.Get("/auth/passkey/available", s.handlePasskeyAvailable)
 		// The login page needs the brand before anyone has signed in.
 		api.Get("/branding", s.handleBranding)
 		// Called by the phpMyAdmin shim over the loopback address, which
@@ -147,6 +153,10 @@ func (s *Server) routes() http.Handler {
 				own.Use(s.refuseWhileImpersonating)
 				own.Post("/auth/password", s.handleChangeOwnPassword)
 				own.Post("/auth/email", s.handleChangeOwnEmail)
+				own.Get("/auth/passkeys", s.handlePasskeyStatus)
+				own.Post("/auth/passkeys/register/start", s.handlePasskeyRegisterStart)
+				own.Post("/auth/passkeys/register/finish", s.handlePasskeyRegisterFinish)
+				own.Delete("/auth/passkeys", s.handlePasskeyDelete)
 				own.Post("/auth/2fa/setup", s.handleTOTPSetup)
 				own.Post("/auth/2fa/enable", s.handleTOTPEnable)
 				own.Post("/auth/2fa/disable", s.handleTOTPDisable)
@@ -250,6 +260,7 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/settings/hostnames", s.handleHostnameAdd)
 				ar.Delete("/settings/hostnames", s.handleHostnameDelete)
 				ar.Put("/settings/ipv6", s.handleIPv6Set)
+				ar.Put("/settings/passkeys", s.handlePasskeyEnable)
 				ar.Put("/users/{id}/reseller-limits", s.handleResellerLimitsSet)
 				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})

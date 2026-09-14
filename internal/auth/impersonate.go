@@ -74,6 +74,20 @@ func (s *Service) StopImpersonating(ctx context.Context, cookie, ip, userAgent s
 	return operator, next, fresh, nil
 }
 
+// StartSession opens an ordinary session for an account that has already
+// been authenticated by some other means.
+//
+// Passkey sign-in is the caller: the assertion is the proof, and there is no
+// password to verify. The suspension check is repeated here rather than left
+// to the caller, because this is the function that mints the session and a
+// suspended account must never get one.
+func (s *Service) StartSession(ctx context.Context, u *db.User, ip, userAgent string) (*db.Session, string, error) {
+	if u.Suspended {
+		return nil, "", ErrSuspended
+	}
+	return s.newSessionAs(ctx, u.ID, 0, ip, userAgent)
+}
+
 // SessionFor resolves a cookie to its session row without the freshness
 // checks ValidateSession makes. Callers that already validated the request
 // use it to read what the session is, not whether it is good.

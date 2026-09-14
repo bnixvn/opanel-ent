@@ -207,6 +207,24 @@ func cmdCert(ctx context.Context, args []string) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	// Also record it as a hostname the panel answers on. Without this the
+	// panel would serve the certificate but refuse the name, and anything
+	// that reads the hostname list -- passkeys, most visibly -- would not
+	// know the panel has a name at all.
+	if store, err := db.Open(ctx, cfg.DBPath); err == nil {
+		defer func() { _ = store.Close() }()
+		if err := store.AddPanelHostname(ctx, &db.PanelHostname{
+			Hostname: domain, CertFile: cert.CertFile, KeyFile: cert.KeyFile,
+			IsPrimary: true,
+		}); err != nil {
+			fmt.Printf("Warning: could not record %s as a panel hostname: %v\n", domain, err)
+		} else if err := store.SetPrimaryHostname(ctx, domain); err != nil {
+			fmt.Printf("Warning: could not make %s the primary hostname: %v\n", domain, err)
+		} else {
+			fmt.Printf("Recorded %s as the panel's primary hostname.\n", domain)
+		}
+	}
+
 	fmt.Printf("Recorded in %s. Restart the panel to use it:\n", envPath)
 	fmt.Println("  systemctl restart opanel-api")
 	return nil

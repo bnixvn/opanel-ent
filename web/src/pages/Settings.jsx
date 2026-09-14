@@ -2,6 +2,86 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
+// PasskeySwitch is the administrator's activation button.
+//
+// It stays disabled, with the reasons spelled out, until the server can
+// actually support passkeys: a domain name for the panel and a certificate a
+// browser trusts. Switching it on anyway would put a button on the login
+// page that fails inside the browser, which reads as the panel being broken
+// rather than the host being unconfigured.
+function PasskeySwitch({ msg }) {
+  const [state, setState] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/passkeys');
+      setState(res.state);
+    } catch { /* not fatal: the rest of the page still works */ }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (!state) return null;
+
+  return (
+    <Card title="Passkeys">
+      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+        A passkey is a key held by a phone or a security key. It cannot be
+        phished, reused from somebody else&apos;s breach, or typed into a copy
+        of this login page — the signature is bound to this server&apos;s own
+        address.
+      </p>
+
+      {state.ready ? (
+        <>
+          <div className="row" style={{ alignItems: 'center' }}>
+            <div>
+              <button
+                type="button"
+                className={state.enabled ? 'danger' : 'primary'}
+                onClick={async () => {
+                  try {
+                    const res = await api.put('/settings/passkeys', { enabled: !state.enabled });
+                    setState(res.state);
+                    msg.ok(res.state.enabled
+                      ? 'Passkeys are on. Everyone can add one from their Account page.'
+                      : 'Passkeys are off. Registered keys are kept but cannot be used to sign in.');
+                  } catch (err) {
+                    msg.fail(err);
+                  }
+                }}
+              >
+                {state.enabled ? 'Turn passkeys off' : 'Turn passkeys on'}
+              </button>
+            </div>
+            <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.83rem' }}>
+              Passkeys will be bound to <code>{state.hostname}</code> and will
+              only work at <code>{state.origin}</code>. Changing the
+              panel&apos;s hostname later makes every registered key unusable,
+              so pick the address people will keep using.
+            </p>
+          </div>
+          <p style={{ marginBottom: 0 }}>
+            <Tag kind={state.enabled ? 'ok' : 'mute'}>
+              {state.enabled ? 'on' : 'off'}
+            </Tag>
+          </p>
+        </>
+      ) : (
+        <>
+          <p style={{ margin: '0 0 .4rem' }}>
+            <Tag kind="warn">not available yet</Tag>
+          </p>
+          <ul className="muted" style={{ fontSize: '.85rem', margin: '0 0 .6rem', paddingLeft: '1.1rem' }}>
+            {(state.blockers || []).map((b) => <li key={b}>{b}</li>)}
+          </ul>
+          <button type="button" disabled>Turn passkeys on</button>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
   const [data, setData] = useState(null);
   const msg = useMessage();
@@ -89,6 +169,8 @@ export default function Settings() {
           )}
         </div>
       </Card>
+
+      <PasskeySwitch msg={msg} />
 
       <Card title="Panel addresses">
         <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>

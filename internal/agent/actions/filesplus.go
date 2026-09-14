@@ -121,8 +121,8 @@ func (r *FileExtractRequest) Validate() error {
 
 // FileExtractResult reports what came out.
 type FileExtractResult struct {
-	Entries int   `json:"entries"`
-	Bytes   int64 `json:"bytes"`
+	Entries int    `json:"entries"`
+	Bytes   int64  `json:"bytes"`
 	Dest    string `json:"dest"`
 }
 
