@@ -15,6 +15,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
+	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 )
 
@@ -27,6 +28,7 @@ type Server struct {
 	sites     *sites.Service
 	databases *databases.Service
 	users     *panelusers.Service
+	plans     *plans.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -34,7 +36,7 @@ type Server struct {
 }
 
 // New builds the API server and its route table.
-func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service,
+func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service,
 	log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
@@ -47,6 +49,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		sites:     siteSvc,
 		databases: dbSvc,
 		users:     userSvc,
+		plans:     planSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -103,6 +106,12 @@ func (s *Server) routes() http.Handler {
 			pr.Post("/auth/2fa/enable", s.handleTOTPEnable)
 			pr.Post("/auth/2fa/disable", s.handleTOTPDisable)
 
+			// Usage against the assigned package. Readable by the account
+			// itself; staff may read anyone's.
+			pr.Get("/usage", s.handleUsage)
+			pr.Get("/users/{id}/usage", s.handleUsage)
+			pr.Get("/plans", s.handlePlanList)
+
 			pr.Get("/php/versions", s.handlePHPList)
 			pr.Get("/webserver/status", s.handleWebserverStatus)
 
@@ -116,6 +125,7 @@ func (s *Server) routes() http.Handler {
 				rr.Delete("/users/{id}", s.handleUserDelete)
 				rr.Post("/users/{id}/password", s.handleUserPassword)
 				rr.Post("/users/{id}/sftp-password", s.handleUserSFTPPassword)
+				rr.Post("/users/{id}/plan", s.handleUserPlanAssign)
 			})
 
 			pr.Group(func(ar chi.Router) {
@@ -127,6 +137,9 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
+				ar.Post("/plans", s.handlePlanCreate)
+				ar.Patch("/plans/{id}", s.handlePlanUpdate)
+				ar.Delete("/plans/{id}", s.handlePlanDelete)
 			})
 		})
 	})

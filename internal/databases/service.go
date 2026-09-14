@@ -24,19 +24,25 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/dbms"
 )
 
+// Limits is the package check a database creation must pass.
+type Limits interface {
+	CheckDatabase(ctx context.Context, ownerID int64) error
+}
+
 // Service creates and removes databases through the agent.
 type Service struct {
-	db    *db.DB
-	agent *agentclient.Client
-	log   *slog.Logger
+	db     *db.DB
+	agent  *agentclient.Client
+	log    *slog.Logger
+	limits Limits
 }
 
 // New builds a Service.
-func New(database *db.DB, ac *agentclient.Client, log *slog.Logger) *Service {
+func New(database *db.DB, ac *agentclient.Client, limits Limits, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{db: database, agent: ac, log: log}
+	return &Service{db: database, agent: ac, log: log, limits: limits}
 }
 
 // Errors callers branch on.
@@ -97,6 +103,11 @@ func (s *Service) CreateDatabase(ctx context.Context, ownerID int64, suffix stri
 		return nil, fmt.Errorf("%w: database %q", ErrNameTaken, name)
 	} else if !errors.Is(err, db.ErrNotFound) {
 		return nil, err
+	}
+	if s.limits != nil {
+		if err := s.limits.CheckDatabase(ctx, ownerID); err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err := agentclient.Call[struct{}](ctx, s.agent, "db.create", 1,

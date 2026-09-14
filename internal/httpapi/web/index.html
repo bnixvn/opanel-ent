@@ -107,6 +107,7 @@
       <button data-tab="databases">Databases</button>
       <button data-tab="php">PHP</button>
       <button data-tab="users" data-staff>Users</button>
+      <button data-tab="plans" data-staff>Packages</button>
       <button data-tab="system">System</button>
       <button data-tab="account">Account</button>
     </nav>
@@ -226,7 +227,7 @@
       <div class="card">
         <h2>Users</h2>
         <div class="scroll"><table id="userTable">
-          <thead><tr><th>User</th><th>Role</th><th>Owns</th><th>2FA</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Role</th><th>Package</th><th>Usage</th><th>2FA</th><th>Status</th><th></th></tr></thead>
           <tbody></tbody>
         </table></div>
       </div>
@@ -249,6 +250,36 @@
       <div class="card">
         <h2>Two-factor authentication</h2>
         <div id="twofa"></div>
+      </div>
+    </section>
+
+    <section data-panel="plans" class="hidden">
+      <div class="card">
+        <h2>New package</h2>
+        <form id="newPlan" class="row">
+          <div class="field"><label for="npName">Name</label>
+            <input id="npName" placeholder="Starter" required style="width:100%"></div>
+          <div class="field"><label for="npSites">Max sites</label>
+            <input id="npSites" type="number" min="0" value="1" style="width:100%"></div>
+          <div class="field"><label for="npDbs">Max databases</label>
+            <input id="npDbs" type="number" min="0" value="1" style="width:100%"></div>
+          <div class="field"><label for="npDisk">Disk (MB)</label>
+            <input id="npDisk" type="number" min="0" value="1024" style="width:100%"></div>
+          <div><button class="act primary" type="submit">Create package</button></div>
+        </form>
+        <p class="muted" style="margin:.6rem 0 0;font-size:.83rem">
+          0 means unlimited. Site and database limits are enforced when something is
+          created. The disk figure is measured with <code>du</code> and is advisory:
+          the filesystem here cannot enforce a quota without a reboot.</p>
+      </div>
+
+      <div class="card">
+        <h2>Packages</h2>
+        <div class="scroll"><table id="planTable">
+          <thead><tr><th>Package</th><th>Sites</th><th>Databases</th><th>Disk</th><th>Accounts</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="planEmpty">No packages yet. Accounts without one are unlimited.</div>
       </div>
     </section>
 
@@ -351,6 +382,7 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.tab === "system") loadSystem();
   if (b.dataset.tab === "databases") loadDatabases();
   if (b.dataset.tab === "users") loadUsers();
+  if (b.dataset.tab === "plans") loadPlans();
   if (b.dataset.tab === "account") loadAccount();
 }));
 
@@ -623,6 +655,90 @@ async function phpAction(btn, path, method, busy) {
   await loadSites();
 }
 
+/* ---------- packages ---------- */
+
+let plansCache = [];
+const unl = n => (n === 0 ? '<span class="muted">unlimited</span>' : String(n));
+
+async function loadPlans() {
+  let data;
+  try { data = await api("/plans"); }
+  catch (err) { note("#msg", err.message); return; }
+  plansCache = data.plans;
+
+  const tb = $("#planTable tbody");
+  tb.innerHTML = "";
+  $("#planEmpty").classList.toggle("hidden", data.plans.length > 0);
+  $("#planTable").classList.toggle("hidden", data.plans.length === 0);
+
+  for (const p of data.plans) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><strong>${esc(p.name)}</strong>${p.description
+        ? `<br><span class="muted" style="font-size:.85em">${esc(p.description)}</span>` : ""}</td>` +
+      `<td><input type="number" min="0" value="${p.max_sites}" data-pf="max_sites" data-pid="${p.id}" style="width:5.5rem"></td>` +
+      `<td><input type="number" min="0" value="${p.max_databases}" data-pf="max_databases" data-pid="${p.id}" style="width:5.5rem"></td>` +
+      `<td><input type="number" min="0" value="${p.disk_quota_mb}" data-pf="disk_quota_mb" data-pid="${p.id}" style="width:6.5rem"> <span class="muted">MB</span></td>` +
+      `<td class="muted">${p.users}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        `<button class="act" data-psave="${p.id}">Save</button> ` +
+        `<button class="act danger" data-pdel="${p.id}" data-name="${esc(p.name)}" data-users="${p.users}">Delete</button>` +
+      `</td>`;
+    tb.appendChild(tr);
+  }
+
+  $$("[data-psave]", tb).forEach(b => b.addEventListener("click", () => {
+    const id = b.dataset.psave;
+    const p = plansCache.find(x => x.id === Number(id));
+    const val = f => Number($(`[data-pid="${id}"][data-pf="${f}"]`, tb).value) || 0;
+    planGuard(() => api(`/plans/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: p.name, description: p.description,
+        max_sites: val("max_sites"),
+        max_databases: val("max_databases"),
+        disk_quota_mb: val("disk_quota_mb"),
+        default_php: p.default_php,
+      }),
+    }), `${p.name} saved`);
+  }));
+
+  $$("[data-pdel]", tb).forEach(b => b.addEventListener("click", () => {
+    const n = Number(b.dataset.users);
+    const extra = n > 0
+      ? `\n\n${n} account(s) are on it and will be left unlimited until you assign another.`
+      : "";
+    if (!confirm(`Delete package ${b.dataset.name}?${extra}`)) return;
+    planGuard(() => api(`/plans/${b.dataset.pdel}`, { method: "DELETE" }), "Package deleted");
+  }));
+}
+
+async function planGuard(fn, okMsg) {
+  note("#msg", "");
+  try { await fn(); note("#msg", okMsg, "ok"); }
+  catch (err) { note("#msg", err.message); }
+  await loadPlans();
+}
+
+$("#newPlan").addEventListener("submit", async e => {
+  e.preventDefault();
+  note("#msg", "");
+  try {
+    await api("/plans", {
+      method: "POST",
+      body: JSON.stringify({
+        name: $("#npName").value.trim(),
+        max_sites: Number($("#npSites").value) || 0,
+        max_databases: Number($("#npDbs").value) || 0,
+        disk_quota_mb: Number($("#npDisk").value) || 0,
+      }),
+    });
+    $("#npName").value = "";
+    note("#msg", "Package created", "ok");
+  } catch (err) { note("#msg", err.message); }
+  await loadPlans();
+});
+
 /* ---------- users ---------- */
 
 let rolesCache = ["admin", "reseller", "end_user"];
@@ -632,6 +748,9 @@ async function loadUsers() {
   let data;
   try { data = await api("/users"); }
   catch (err) { note("#msg", err.message); return; }
+  // The package picker needs the list; loading it here keeps the two views
+  // consistent without a second round trip per row.
+  if (!plansCache.length) { try { plansCache = (await api("/plans")).plans; } catch {} }
   rolesCache = data.roles;
   $("#nuRole").innerHTML = rolesCache
     .map(r => `<option value="${r}"${r === "end_user" ? " selected" : ""}>${roleLabel(r)}</option>`).join("");
@@ -649,7 +768,11 @@ async function loadUsers() {
         ? `<select data-role="${u.id}">${rolesCache.map(r =>
             `<option value="${r}"${r === u.role ? " selected" : ""}>${roleLabel(r)}</option>`).join("")}</select>`
         : roleLabel(u.role)}</td>` +
-      `<td class="muted">${u.sites} site${u.sites === 1 ? "" : "s"}, ${u.databases} db</td>` +
+      `<td>${me.role === "admin"
+        ? `<select data-plan="${u.id}"><option value="">none</option>` +
+          plansCache.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("") + `</select>`
+        : '<span class="muted">\u2014</span>'}</td>` +
+      `<td class="muted" data-usage="${u.id}">${u.sites} site${u.sites === 1 ? "" : "s"}, ${u.databases} db</td>` +
       `<td>${u.totp_enabled ? tag("on", "ok") : tag("off", "mute")}</td>` +
       `<td>${u.suspended ? tag("suspended", "warn") : tag("active", "ok")}</td>` +
       `<td style="text-align:right;white-space:nowrap">` +
@@ -663,6 +786,30 @@ async function loadUsers() {
       `</td>`;
     tb.appendChild(tr);
   }
+
+  // Disk usage is measured with du on the host, so it is fetched per row
+  // after the table is on screen rather than blocking the whole listing.
+  for (const u of data.users) {
+    if (!u.linux_uid) continue;
+    api(`/users/${u.id}/usage`).then(res => {
+      const cell = $(`[data-usage="${u.id}"]`, tb);
+      if (!cell) return;
+      const g = res.usage;
+      const quota = g.disk_quota_mb ? ` / ${g.disk_quota_mb} MB` : "";
+      cell.innerHTML =
+        `${g.sites}${g.max_sites ? "/" + g.max_sites : ""} site, ` +
+        `${g.databases}${g.max_databases ? "/" + g.max_databases : ""} db<br>` +
+        `<span${res.over_quota ? ' class="tag bad"' : ""}>${fmtBytes(g.disk_bytes)}${quota}</span>`;
+      const sel = $(`[data-plan="${u.id}"]`, tb);
+      if (sel && g.plan_id) sel.value = String(g.plan_id);
+    }).catch(() => {});
+  }
+
+  $$("[data-plan]", tb).forEach(sel => sel.addEventListener("change", () =>
+    userGuard(() => api(`/users/${sel.dataset.plan}/plan`, {
+      method: "POST",
+      body: JSON.stringify({ plan_id: sel.value ? Number(sel.value) : null }),
+    }), sel.value ? "Package assigned" : "Package cleared")));
 
   $$("[data-role]", tb).forEach(sel => sel.addEventListener("change", () =>
     userGuard(() => api(`/users/${sel.dataset.role}`, {

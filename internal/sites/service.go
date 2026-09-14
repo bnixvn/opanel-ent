@@ -25,19 +25,28 @@ import (
 )
 
 // Service manages websites.
+// Limits is the package check a site creation must pass. An interface rather
+// than the concrete service, so this package does not import plans and the
+// dependency stays one-directional.
+type Limits interface {
+	CheckSite(ctx context.Context, ownerID int64) error
+}
+
 type Service struct {
-	db    *db.DB
-	agent *agentclient.Client
-	log   *slog.Logger
-	cfg   webserver.ServerConfig
+	db     *db.DB
+	agent  *agentclient.Client
+	log    *slog.Logger
+	cfg    webserver.ServerConfig
+	limits Limits
 }
 
 // New builds a Service.
-func New(database *db.DB, ac *agentclient.Client, cfg webserver.ServerConfig, log *slog.Logger) *Service {
+func New(database *db.DB, ac *agentclient.Client, cfg webserver.ServerConfig,
+	limits Limits, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{db: database, agent: ac, log: log, cfg: cfg}
+	return &Service{db: database, agent: ac, log: log, cfg: cfg, limits: limits}
 }
 
 // Errors callers are expected to branch on.
@@ -130,6 +139,12 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Site, erro
 	}
 	if err := s.checkHostnamesFree(ctx, req.Domain, req.Aliases, 0); err != nil {
 		return nil, err
+	}
+	// Checked before anything is created, so a refusal leaves nothing behind.
+	if s.limits != nil {
+		if err := s.limits.CheckSite(ctx, owner.ID); err != nil {
+			return nil, err
+		}
 	}
 	if req.PHPVersion != "" {
 		if err := s.requirePHP(ctx, req.PHPVersion); err != nil {

@@ -31,6 +31,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerPackages(r)
 	registerSites(r, deps)
 	registerDatabases(r)
+	registerQuota(r)
 }
 
 // PingResult is the reply to "ping".

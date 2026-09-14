@@ -24,6 +24,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
+	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/tlsx"
 	"github.com/bnixvn/opanel-ent/internal/version"
@@ -79,10 +80,11 @@ func run(cfg *config.Config, log *slog.Logger) error {
 			"socket", cfg.AgentSocket, "err", err)
 	}
 
-	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), log)
-	dbSvc := databases.New(database, ac, log)
+	planSvc := plans.New(database, ac, log)
+	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), planSvc, log)
+	dbSvc := databases.New(database, ac, planSvc, log)
 	userSvc := panelusers.New(database, ac, log)
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, log)
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, log)
 	api.StartBackgroundTasks(ctx)
 
 	srv := api.HTTPServer()

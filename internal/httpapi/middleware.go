@@ -158,6 +158,11 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
+// roleAtLeastReseller is the staff test the handlers share.
+func roleAtLeastReseller(u *db.User) bool {
+	return auth.Role(u.Role).AtLeast(auth.RoleReseller)
+}
+
 // requireRole gates a route on a minimum role.
 func (s *Server) requireRole(min auth.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
