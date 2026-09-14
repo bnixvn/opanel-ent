@@ -38,6 +38,10 @@ Take the binaries from a release, or build them (below), then:
 ./opanelctl install
 ```
 
+Nothing else needs installing first: the installer brings its own
+dependencies. Building from source is the one path that needs a toolchain,
+and a freshly installed AlmaLinux 10 has none of it.
+
 That is the whole installation. It is idempotent: every step checks whether
 it is already done, so running it again after a failure continues rather than
 starts over. It will:
@@ -71,13 +75,22 @@ accept grudgingly and passkeys refuse outright.
 
 ## Build from source
 
-Needs Go 1.26 and Node 22. The built web interface is committed, so `go build`
-works on a fresh clone without touching npm.
+Needs Go 1.26. Node 22 is only needed to change the interface: its built
+output is committed, so a fresh clone builds without touching npm.
+
+A minimal AlmaLinux 10 has neither, and no `make` either:
 
 ```bash
+dnf install -y make git
+curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+export PATH=$PATH:/usr/local/go/bin
+
+git clone https://github.com/bnixvn/opanel-ent.git
+cd opanel-ent
 make build            # all three binaries into dist/, version stamped
-make web              # rebuild the interface into internal/httpapi/web
 ```
+
+`make web` rebuilds the interface, and is the only target that wants npm.
 
 Building by hand loses the version stamp and the panel will report `dev`:
 

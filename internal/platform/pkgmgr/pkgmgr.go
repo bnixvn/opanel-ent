@@ -56,8 +56,20 @@ func Installed(ctx context.Context, names ...string) (bool, error) {
 	if err := checkNames(names); err != nil {
 		return false, err
 	}
-	// rpm -q exits 1 when any package is missing, which is an answer.
-	res, err := run.Cmd(ctx, append([]string{"rpm", "-q", "--quiet"}, names...), run.AllowExit(1))
+	// rpm -q exits with the number of packages it could not find, not with 1.
+	// Allowing only 1 meant this worked while a single package was missing
+	// and failed the install on a machine where none of them were -- which
+	// is every machine the installer is actually run on.
+	//
+	// The range is spelled out rather than allowing anything non-zero, so an
+	// exit code that cannot be a count -- a corrupt rpm database, a killed
+	// process -- is still reported as the failure it is.
+	missing := make([]int, len(names))
+	for i := range missing {
+		missing[i] = i + 1
+	}
+	res, err := run.Cmd(ctx, append([]string{"rpm", "-q", "--quiet"}, names...),
+		run.AllowExit(missing...))
 	if err != nil {
 		return false, err
 	}
