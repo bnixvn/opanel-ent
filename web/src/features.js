@@ -37,7 +37,9 @@ export const FEATURES = [
   {
     group: 'Account',
     items: [
-      { to: '/account', label: 'Account', icon: 'account' },
+      { to: '/account/settings', label: 'My account', icon: 'account' },
+      { to: '/terminal', label: 'Terminal', icon: 'terminal' },
+      { to: '/sftp', label: 'SFTP', icon: 'sftp' },
     ],
   },
 ];

@@ -440,6 +440,50 @@ dl.kv dd { margin: 0; }
 
 .search { max-width: 18rem; }
 
+.copyable { margin: 0 0 0.2rem; }
+
+.subhead {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 1.1rem 0 0.5rem;
+  display: flex;
+  align-items: center;
+}
+.madecreds {
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+/* ---------- terminal ---------- */
+
+.terminal { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.terminalbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+}
+.terminalbar .spacer { flex: 1; }
+.terminalbar .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); }
+.terminalbar .dot.open { background: var(--ok); }
+.terminalbar .dot.connecting { background: var(--warn); }
+.terminalbar .dot.closed { background: var(--bad); }
+/* The emulator measures itself against this box, so it needs a height that
+   does not depend on its own content. */
+.terminalbody { height: 24rem; padding: 0.4rem; background: #16191d; }
+@media (max-width: 46rem) {
+  .terminalbody { height: 16rem; }
+}
+.copyrow { display: flex; gap: 0.4rem; align-items: center; }
+.copyrow > code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 0.4rem 0.5rem; }
+.copyrow > button { flex: 0 0 auto; }
+
 /* A field whose value the server prefixes: the prefix sits inside the box so
    the name on screen is the name that gets created. */
 .prefixed { display: flex; align-items: stretch; }

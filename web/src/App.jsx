@@ -21,6 +21,8 @@ import System from './pages/System.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import TerminalPage from './pages/TerminalPage.jsx';
+import Sftp from './pages/Sftp.jsx';
 import StatusRail from './StatusRail.jsx';
 import { FEATURES } from './features.js';
 
@@ -36,7 +38,7 @@ const MENU = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/main', label: 'Main', group: 'Main' },
   { to: '/server', label: 'Server', group: 'Server', roles: ['admin', 'reseller'] },
-  { to: '/account', label: 'Account', group: 'Account' },
+  { to: '/account', label: 'Account', group: 'Account', end: true },
 ];
 
 // groupOf says which block a path belongs to, so the heading above a page
@@ -191,7 +193,7 @@ export default function App() {
               <div className="who">
                 Signed in as <strong>{me.username}</strong><br />{role}
               </div>
-              <Link to="/account" onClick={closeAccountMenu}>Account settings</Link>
+              <Link to="/account/settings" onClick={closeAccountMenu}>Account settings</Link>
               <button
                 type="button"
                 onClick={async () => {
@@ -225,7 +227,12 @@ export default function App() {
               <Route path="/backups" element={<Backups me={me} />} />
               <Route path="/ssl" element={<Ssl me={me} />} />
               <Route path="/logs" element={<Logs />} />
-              <Route path="/account" element={<Account me={me} onChanged={setMe} />} />
+              {/* /account is the group; the settings themselves are one
+                  of the three things in it. */}
+              <Route path="/account" element={<Dashboard me={me} only="Account" />} />
+              <Route path="/account/settings" element={<Account me={me} onChanged={setMe} />} />
+              <Route path="/terminal" element={<TerminalPage />} />
+              <Route path="/sftp" element={<Sftp />} />
               {(role === 'admin' || role === 'reseller') && (
                 <>
                   <Route

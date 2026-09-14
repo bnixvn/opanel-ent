@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, download, fmtBytes } from '../api.js';
-import { Card, Empty, Hint, Message, Search, Secret, matches, useConfirm, useMessage } from '../components.jsx';
+import { Card, Copyable, Empty, Hint, Message, Search, matches, useConfirm, useMessage } from '../components.jsx';
 
 export default function Databases({ me }) {
   const [databases, setDatabases] = useState([]);
@@ -132,18 +132,21 @@ export default function Databases({ me }) {
       </Card>
 
       {secret && (
-        <Card title="Database created">
+        <Card title={secret.database ? 'Database created' : 'New password'}>
           <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-            The password is shown once. Put it into the application's
+            The password is shown once. Put it into the application&apos;s
             configuration now.
           </p>
-          <dl className="kv">
-            <dt>Database</dt><dd><code>{secret.database}</code></dd>
-            <dt>Username</dt><dd><code>{secret.username}</code></dd>
-            <dt>Host</dt><dd><code>{secret.host || '127.0.0.1'}</code></dd>
-          </dl>
-          <Secret label="Password" value={secret.password} />
-          <button type="button" onClick={() => setSecret(null)}>Close</button>
+          {secret.warning && <Message value={{ kind: 'warn', text: secret.warning }} />}
+          <div className="grid2">
+            <Copyable label="Database" value={secret.database} />
+            <Copyable label="Username" value={secret.username} />
+            <Copyable label="Host" value={secret.host || 'localhost'} />
+            <Copyable label="Password" value={secret.password} />
+          </div>
+          <p style={{ marginBottom: 0 }}>
+            <button type="button" onClick={() => setSecret(null)}>Close</button>
+          </p>
         </Card>
       )}
 
@@ -232,7 +235,7 @@ export default function Databases({ me }) {
                             'Password reset',
                           );
                           if (res && res.password) {
-                            setSecret({ database: '—', username: u.username, password: res.password });
+                            setSecret({ username: u.username, host: 'localhost', password: res.password });
                           }
                         }}
                       >
@@ -293,6 +296,7 @@ function NewDatabase({ staff, owners, me, onCreated, onDone }) {
             username: res.user ? res.user.username : '',
             password: res.password || '',
             host: res.host,
+            warning: res.warning || '',
           });
         }
       }}

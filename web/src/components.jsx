@@ -117,14 +117,23 @@ export function useConfirm() {
 
 // Secret shows a password once, with a copy button, and makes clear it will
 // not be shown again.
-export function Secret({ label, value }) {
+// Copyable is a value somebody is about to paste somewhere else.
+//
+// The button is the point. Every one of these is a string that has to arrive
+// somewhere character for character -- a database name, a host, a password
+// nobody will be shown twice -- and retyping one is how people end up with a
+// connection that fails for a reason they cannot see.
+export function Copyable({ label, value, hint }) {
   const [copied, setCopied] = useState(false);
   if (!value) return null;
   return (
-    <div style={{ margin: '.4rem 0' }}>
-      <label>{label}</label>
-      <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
-        <code style={{ flex: 1, wordBreak: 'break-all' }}>{value}</code>
+    <div className="copyable">
+      <label>
+        {label}
+        {hint && <Hint>{hint}</Hint>}
+      </label>
+      <div className="copyrow">
+        <code>{value}</code>
         <button
           type="button"
           onClick={() => {
@@ -139,6 +148,11 @@ export function Secret({ label, value }) {
       </div>
     </div>
   );
+}
+
+// Secret is a Copyable, kept under its old name for the pages that show one.
+export function Secret(props) {
+  return <Copyable {...props} />;
 }
 
 // Hint is an explanation somebody can ask for.

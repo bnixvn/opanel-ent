@@ -3,6 +3,7 @@ module github.com/bnixvn/opanel-ent
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.12
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-sql-driver/mysql v1.10.1

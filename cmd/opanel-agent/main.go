@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/distro"
+	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
 	"github.com/bnixvn/opanel-ent/internal/webserver/ols"
 )
@@ -114,14 +116,44 @@ func run(log *slog.Logger, socketPath, apiUser, socketGroup, extraUIDs string) e
 		return err
 	}
 
+	// Homes provisioned by older builds belong to their occupant, and sshd
+	// will not chroot into a directory its occupant owns -- so SFTP fails
+	// with an error only the server's log ever sees. Put them right on the
+	// way up rather than wait for somebody to report that uploads do not
+	// work.
+	if fixed, err := linuxuser.RepairHomes(context.Background()); err != nil {
+		log.Warn("opanel-agent: could not check account homes", "err", err)
+	} else if len(fixed) > 0 {
+		log.Info("opanel-agent: repaired home ownership", "accounts", fixed)
+	}
+
+	// Terminals get their own listener beside the action socket, because a
+	// shell is a stream and the action protocol is not.
+	termSrv := agent.NewTerminalServer(agent.TerminalOptions{
+		Logger:      log,
+		SocketGID:   gid,
+		AllowedUIDs: allowed,
+	})
+	termPath := filepath.Join(filepath.Dir(socketPath), "terminal.sock")
+	if err := termSrv.Listen(termPath); err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	go func() {
+		if err := termSrv.Serve(ctx); err != nil {
+			log.Error("opanel-agent: terminal listener stopped", "err", err)
+		}
+	}()
 
 	log.Info("opanel-agent: listening",
 		"socket", socketPath,
 		"version", version.String(),
 		"allowed_uids", allowed,
 		"actions", len(registry.Actions()),
+		"terminal_socket", termPath,
 	)
 
 	if err := srv.Serve(ctx); err != nil {

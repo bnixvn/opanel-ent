@@ -183,6 +183,16 @@ func (s *Server) routes() http.Handler {
 			pr.Patch("/backup-destinations/{id}", s.handleDestinationUpdate)
 			pr.Post("/backup-destinations/{id}/test", s.handleDestinationTest)
 			pr.Delete("/backup-destinations/{id}", s.handleDestinationDelete)
+			// SFTP credentials. A user manages their own; staff may pass
+			// ?user= to manage one of their customers'.
+			// A shell as your own Linux account. Staff may pass ?user= for
+			// one of their customers; the agent decides whether to grant it.
+			pr.Get("/terminal/status", s.handleTerminalStatus)
+			pr.Get("/terminal", s.handleTerminal)
+			pr.Get("/sftp", s.handleSFTPList)
+			pr.Post("/sftp", s.handleSFTPCreate)
+			pr.Post("/sftp/{id}/password", s.handleSFTPPassword)
+			pr.Delete("/sftp/{id}", s.handleSFTPDelete)
 			pr.Get("/cron", s.handleCronList)
 			pr.Post("/cron", s.handleCronCreate)
 			pr.Patch("/cron/{id}", s.handleCronUpdate)

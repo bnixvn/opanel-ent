@@ -131,6 +131,21 @@ const PATHS = {
       <circle cx="11" cy="16" r="2.4" />
     </>
   ),
+  terminal: (
+    <>
+      <rect x="3" y="4.5" width="18" height="15" rx="2" />
+      <path d="M7 9.5l3 2.5-3 2.5" />
+      <path d="M12.5 15h4" />
+    </>
+  ),
+  sftp: (
+    <>
+      <path d="M12 3v9" />
+      <path d="M8.5 8.5L12 12l3.5-3.5" />
+      <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+      <path d="M7 17h.01" />
+    </>
+  ),
   account: (
     <>
       <circle cx="12" cy="12" r="9" />

@@ -1,0 +1,215 @@
+package httpapi
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/auth"
+	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/termproto"
+)
+
+// handleTerminalStatus says whether the signed-in account can have a shell,
+// so the page can show a reason rather than a button that fails.
+func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if u.LinuxUID == nil || *u.LinuxUID == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"available": false,
+			"reason": "This account has no files on the server. Only hosting accounts " +
+				"have a Linux user to open a shell as.",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"available": true,
+		"username":  u.Username,
+	})
+}
+
+// handleTerminal bridges a browser WebSocket to a shell on the agent.
+//
+// The panel is the wrong process to start a shell in: it runs unprivileged
+// and cannot become anybody. It is the right process to decide whose shell
+// this is, because it is the one holding the session. So it carries bytes
+// and nothing else, and the agent -- which can grant a shell -- makes its
+// own decision about whether to.
+func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if u.LinuxUID == nil || *u.LinuxUID == 0 {
+		writeError(w, http.StatusBadRequest, "no_linux_account",
+			"this account has no Linux user to open a shell as")
+		return
+	}
+	target := u.Username
+
+	// Staff may open a customer's shell. Never anybody else's, and never a
+	// shell as somebody senior to them.
+	if want := r.URL.Query().Get("user"); want != "" && want != u.Username {
+		other := s.userByName(r.Context(), want)
+		if other == nil || !mayOpenShellFor(u, other) {
+			writeError(w, http.StatusNotFound, "not_found", "no such account")
+			return
+		}
+		if other.LinuxUID == nil || *other.LinuxUID == 0 {
+			writeError(w, http.StatusBadRequest, "no_linux_account",
+				"that account has no Linux user to open a shell as")
+			return
+		}
+		target = other.Username
+	}
+
+	cols := uint16(clampInt(r.URL.Query().Get("cols"), 80, 20, 500))
+	rows := uint16(clampInt(r.URL.Query().Get("rows"), 24, 5, 200))
+
+	// The socket first. A browser handed an accepted WebSocket that then
+	// fails to reach the agent has no way to be told why, because the reason
+	// is gone with the HTTP response.
+	sockPath := filepath.Join(filepath.Dir(s.agentSocket()), "terminal.sock")
+	conn, err := net.DialTimeout("unix", sockPath, 5*time.Second)
+	if err != nil {
+		s.log.Error("httpapi: cannot reach the terminal socket", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "agent_unreachable",
+			"the agent is not answering; terminals need opanel-agent running")
+		return
+	}
+	defer func() { _ = conn.Close() }()
+
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if err := json.NewEncoder(conn).Encode(termproto.Hello{User: target, Cols: cols, Rows: rows}); err != nil {
+		writeError(w, http.StatusBadGateway, "agent_error", "the agent closed the connection")
+		return
+	}
+	br := bufio.NewReader(conn)
+	line, err := br.ReadBytes('\n')
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "agent_error", "the agent closed the connection")
+		return
+	}
+	var ready termproto.Ready
+	if err := json.Unmarshal(line, &ready); err != nil || !ready.OK {
+		msg := ready.Error
+		if msg == "" {
+			msg = "the agent refused the session"
+		}
+		writeError(w, http.StatusForbidden, "refused", msg)
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		// Same origin only. A terminal reachable from any page somebody can
+		// be persuaded to open is a shell handed to whoever wrote that page.
+		OriginPatterns: []string{r.Host},
+	})
+	if err != nil {
+		s.log.Warn("httpapi: terminal websocket refused", "err", err)
+		return
+	}
+	defer func() { _ = ws.CloseNow() }()
+	s.audit(r, "terminal.open", target, true, "")
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// Agent to browser.
+	go func() {
+		defer cancel()
+		for {
+			kind, payload, err := termproto.ReadFrame(br)
+			if err != nil {
+				return
+			}
+			switch kind {
+			case termproto.FrameData:
+				if err := ws.Write(ctx, websocket.MessageBinary, payload); err != nil {
+					return
+				}
+			case termproto.FrameExit:
+				_ = ws.Close(websocket.StatusNormalClosure, string(payload))
+				return
+			}
+		}
+	}()
+
+	// Browser to agent. A text message is a control message -- only resize
+	// so far -- and a binary one is keystrokes, so a person typing JSON at a
+	// shell is not mistaken for a command to the panel.
+	for {
+		typ, data, err := ws.Read(ctx)
+		if err != nil {
+			return
+		}
+		if typ == websocket.MessageText {
+			var msg struct {
+				Resize *struct {
+					Cols uint16 `json:"cols"`
+					Rows uint16 `json:"rows"`
+				} `json:"resize"`
+			}
+			if json.Unmarshal(data, &msg) == nil && msg.Resize != nil {
+				_ = termproto.WriteFrame(conn, termproto.FrameResize,
+					termproto.SizePayload(msg.Resize.Cols, msg.Resize.Rows))
+			}
+			continue
+		}
+		if err := termproto.WriteFrame(conn, termproto.FrameData, data); err != nil {
+			return
+		}
+	}
+}
+
+// mayOpenShellFor says whether actor may have a shell as target.
+//
+// Stricter than CanManage: managing an account means changing its package or
+// its password, which leaves a trail the owner can see. A shell is being the
+// customer, so it is reserved for staff over their own customers and never
+// granted sideways or upwards.
+func mayOpenShellFor(actor, target *db.User) bool {
+	if target.LinuxUID == nil || *target.LinuxUID == 0 {
+		return false
+	}
+	return auth.CanManage(actor, target)
+}
+
+// userByName looks an account up, returning nil rather than an error: every
+// caller here turns a failure into the same "no such account".
+func (s *Server) userByName(ctx context.Context, name string) *db.User {
+	u, err := s.db.UserByUsername(ctx, name)
+	if err != nil || u == nil {
+		return nil
+	}
+	return u
+}
+
+// agentSocket reports the path the panel talks to the agent on, so the
+// terminal socket can be found beside it.
+func (s *Server) agentSocket() string {
+	if p := s.cfg.AgentSocket; p != "" {
+		return p
+	}
+	return agent.SocketPath
+}
+
+func clampInt(raw string, fallback, lo, hi int) int {
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
+}

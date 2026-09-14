@@ -271,9 +271,15 @@ func (s *Service) ListDatabases(ctx context.Context, scope db.Scope) ([]*db.Data
 	return rows, nil
 }
 
-// ConnectionHost is what a site's application should connect to. The socket
-// is faster, but a hostname works from every language without configuration.
-const ConnectionHost = "127.0.0.1"
+// ConnectionHost is what a site's application should connect to.
+//
+// localhost rather than 127.0.0.1, because that is what the grant says.
+// Accounts are created for user@localhost, and MariaDB treats the two as
+// different hosts: 127.0.0.1 only reaches that grant while reverse lookups
+// are on, and turning skip-name-resolve on -- which operators do -- would
+// break every connection string the panel had handed out. localhost also
+// takes the unix socket, which is faster and never leaves the machine.
+const ConnectionHost = "localhost"
 
 // VisibleTo is gone. Listings take an auth.ScopeFor(user) now, which can
 // express "mine and my customers'" -- the case a reseller needs and a single

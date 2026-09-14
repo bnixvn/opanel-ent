@@ -52,6 +52,20 @@ func (r *AccountDeleteRequest) Validate() error {
 	return (&AccountRequest{Username: r.Username}).Validate()
 }
 
+// SFTPCredentialRequest adds a second credential to an existing account.
+type SFTPCredentialRequest struct {
+	Username string `json:"username"`
+	Owner    string `json:"owner"`
+}
+
+// Validate checks both names.
+func (r *SFTPCredentialRequest) Validate() error {
+	if err := (&AccountRequest{Username: r.Username}).Validate(); err != nil {
+		return err
+	}
+	return (&AccountRequest{Username: r.Owner}).Validate()
+}
+
 // AccountPasswordRequest sets an account's SFTP password.
 type AccountPasswordRequest struct {
 	Username string `json:"username"`
@@ -277,6 +291,14 @@ func (r *CertIssueRequest) Validate() error {
 func registerSites(r *agent.Registry, deps Deps) {
 	agent.Register(r, "linuxuser.create", 1, func(ctx context.Context, in AccountRequest) (linuxuser.Account, error) {
 		acct, err := linuxuser.Create(ctx, in.Username)
+		if err != nil {
+			return linuxuser.Account{}, err
+		}
+		return *acct, nil
+	})
+
+	agent.Register(r, "linuxuser.create_sftp", 1, func(ctx context.Context, in SFTPCredentialRequest) (linuxuser.Account, error) {
+		acct, err := linuxuser.CreateSFTP(ctx, in.Username, in.Owner)
 		if err != nil {
 			return linuxuser.Account{}, err
 		}

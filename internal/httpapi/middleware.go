@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -91,6 +93,29 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack hands the raw connection over, which is how a WebSocket stops being
+// an HTTP response and becomes a socket.
+//
+// Embedding an http.ResponseWriter only promotes the methods of that
+// interface, and Hijack is not one of them: wrapping the writer silently
+// takes hijacking away from every handler underneath. The terminal is the
+// one handler that needs it, and the failure reads as "the agent is not
+// running", which is a long way from the truth.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := sr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("httpapi: %T cannot be hijacked", sr.ResponseWriter)
+	}
+	return h.Hijack()
+}
+
+// Flush passes a flush through for the same reason.
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (s *Server) accessLog(next http.Handler) http.Handler {

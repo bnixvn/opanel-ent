@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
@@ -252,6 +253,14 @@ func List(ctx context.Context) ([]Account, error) {
 			// reason to fail the whole listing.
 			continue
 		}
+		// Extra SFTP credentials are in this group too, and they are not
+		// accounts: they share an owner's uid and home. Counted here they
+		// would double a disk figure, re-apply a quota that is already
+		// applied, and offer a shell under a name that is not a tenant. An
+		// account owns the home named after it; a credential does not.
+		if acct.Home != Home(name) {
+			continue
+		}
 		out = append(out, *acct)
 	}
 	_ = ctx
@@ -303,4 +312,138 @@ func stopProcesses(ctx context.Context, username string) {
 	}
 	_, _ = run.Cmd(ctx, []string{"pkill", "-KILL", "-u", username},
 		run.Timeout(15*time.Second), run.AllowExit(1))
+}
+
+// CreateSFTP adds an extra SFTP credential for an existing account.
+//
+// A second name and password for the same user, not a second user: it is
+// given the owner's uid and gid deliberately. A credential with a uid of its
+// own can log in and then read nothing, because every file under the account
+// belongs to the owner and a site tree is not group-writable -- which is a
+// login that works and an upload that does not, the least useful thing this
+// could have been. Sharing the uid means it can do exactly what the owner
+// can, which is the point of handing one to a developer.
+//
+// What it keeps separate is the part that matters: its own password, its own
+// name in the SSH log, and its own removal. Withdrawing it does not touch
+// the owner's own credential.
+//
+// It sees the whole account. sshd's ChrootDirectory requires the directory to
+// be owned by root and writable by nobody else, and the only directory under
+// this account that qualifies is the home itself -- every directory inside it
+// belongs to the owner by design. A credential confined to one website would
+// need a bind mount per credential, so this does not pretend to offer one.
+func CreateSFTP(ctx context.Context, username, owner string) (*Account, error) {
+	if !ValidName(username) {
+		return nil, fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
+	}
+	parent, err := Lookup(owner)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil {
+		return nil, fmt.Errorf("linuxuser: %q has no Linux account to attach to", owner)
+	}
+	if acct, err := Lookup(username); err != nil {
+		return nil, err
+	} else if acct != nil {
+		return nil, fmt.Errorf("linuxuser: %q already exists", username)
+	}
+	if err := ensureGroup(ctx, SFTPGroup); err != nil {
+		return nil, err
+	}
+
+	argv := []string{
+		"useradd",
+		"--no-create-home",
+		"--home-dir", parent.Home,
+		"--shell", Shell,
+		// --non-unique is the whole design: same uid as the owner, so the
+		// kernel cannot tell the two apart when it checks a file.
+		"--non-unique",
+		"--uid", strconv.FormatInt(parent.UID, 10),
+		"--gid", strconv.FormatInt(parent.GID, 10),
+		"--groups", SFTPGroup,
+		"--comment", "OPanel SFTP credential for " + owner,
+		username,
+	}
+	if _, err := run.Cmd(ctx, argv, run.Timeout(60*time.Second)); err != nil {
+		return nil, fmt.Errorf("linuxuser: create sftp credential %q: %w", username, err)
+	}
+
+	acct, err := Lookup(username)
+	if err != nil {
+		return nil, err
+	}
+	if acct == nil {
+		return nil, fmt.Errorf("linuxuser: %q was not present after useradd", username)
+	}
+	return acct, nil
+}
+
+// RepairHome puts one account's home back to root:<group> 0751.
+//
+// sshd refuses to chroot into a directory its occupant owns, so a home that
+// belongs to the account is a home nobody can reach over SFTP -- and the
+// error it gives, "bad ownership or modes for chroot directory", never
+// reaches the customer, who sees only a connection that closes. Accounts
+// created before Create started setting this were left that way.
+//
+// Reports whether anything changed, so a caller can say so rather than log
+// a repair on every start.
+func RepairHome(username string) (bool, error) {
+	acct, err := Lookup(username)
+	if err != nil {
+		return false, err
+	}
+	if acct == nil {
+		return false, nil
+	}
+	st, err := os.Stat(acct.Home)
+	if err != nil {
+		// A missing home is a bigger problem than this function's, and one
+		// it cannot fix by creating an empty directory over the top.
+		return false, err
+	}
+	if !st.IsDir() {
+		return false, fmt.Errorf("linuxuser: %s is not a directory", acct.Home)
+	}
+
+	changed := false
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		if sys.Uid != 0 || int64(sys.Gid) != acct.GID {
+			if err := os.Chown(acct.Home, 0, int(acct.GID)); err != nil {
+				return false, fmt.Errorf("linuxuser: chown %s: %w", acct.Home, err)
+			}
+			changed = true
+		}
+	}
+	if st.Mode().Perm() != 0o751 {
+		if err := os.Chmod(acct.Home, 0o751); err != nil {
+			return false, fmt.Errorf("linuxuser: chmod %s: %w", acct.Home, err)
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+// RepairHomes runs RepairHome over every account the panel provisioned and
+// returns the names it had to change.
+func RepairHomes(ctx context.Context) ([]string, error) {
+	accounts, err := List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var fixed []string
+	for _, a := range accounts {
+		changed, err := RepairHome(a.Username)
+		if err != nil {
+			// One unreadable home is not a reason to leave the rest broken.
+			continue
+		}
+		if changed {
+			fixed = append(fixed, a.Username)
+		}
+	}
+	return fixed, nil
 }
