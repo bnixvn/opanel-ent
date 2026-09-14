@@ -22,6 +22,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
+	"github.com/bnixvn/opanel-ent/internal/security"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 	"github.com/bnixvn/opanel-ent/internal/wordpress"
@@ -67,7 +68,8 @@ func newFixture(t *testing.T) *fixture {
 	fileSvc := filemanager.New(database, ac, discardLogger())
 	backupSvc := backups.New(database, ac, discardLogger())
 	wpSvc := wordpress.New(database, ac, dbSvc, discardLogger())
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, discardLogger())
+	fwSvc := security.NewFirewall(database, ac, 2222, discardLogger())
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, fwSvc, discardLogger())
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
 

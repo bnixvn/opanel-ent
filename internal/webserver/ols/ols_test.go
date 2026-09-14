@@ -367,3 +367,69 @@ func TestRewriteRules(t *testing.T) {
 		}
 	}
 }
+
+// TestWAFRendersOnlyWhenBothSidesAgree covers the two conditions that have to
+// hold before ModSecurity appears in the configuration: the host has the
+// engine, and the site asked for it. Naming a module the webserver does not
+// have stops it starting, so getting this wrong takes every site down.
+func TestWAFRendersOnlyWhenBothSidesAgree(t *testing.T) {
+	b := newBackend(t)
+
+	site := testSite("waf.example.com", "alice", webserver.AppPHP, "8.4")
+	site.WAFEnabled = true
+
+	off := testSite("plain.example.com", "bob", webserver.AppPHP, "8.4")
+
+	cases := []struct {
+		name        string
+		rulesFile   string
+		wantServer  bool
+		wantOnSite  bool
+		wantOnPlain bool
+	}{
+		{
+			name:      "engine missing, so nothing is emitted even though the site asked",
+			rulesFile: "",
+		},
+		{
+			name:       "engine present and the site asked",
+			rulesFile:  "/usr/local/lsws/conf/opanel/waf/rules.conf",
+			wantServer: true,
+			wantOnSite: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := webserver.DefaultServerConfig()
+			cfg.WAFRulesFile = tc.rulesFile
+
+			r, err := b.Render(cfg, []webserver.Site{site, off})
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			main := string(r.Main.Content)
+			if got := strings.Contains(main, "module mod_security"); got != tc.wantServer {
+				t.Errorf("server block has the module = %v, want %v", got, tc.wantServer)
+			}
+			if tc.wantServer && !strings.Contains(main, tc.rulesFile) {
+				t.Error("the server block does not name the rules file")
+			}
+
+			for _, f := range r.Vhosts {
+				body := string(f.Content)
+				on := strings.Contains(body, "modsecurity              on")
+				switch {
+				case strings.Contains(f.Path, "waf.example.com"):
+					if on != tc.wantOnSite {
+						t.Errorf("the protected site has the module = %v, want %v", on, tc.wantOnSite)
+					}
+				case strings.Contains(f.Path, "plain.example.com"):
+					if on != tc.wantOnPlain {
+						t.Errorf("the unprotected site has the module = %v, want %v", on, tc.wantOnPlain)
+					}
+				}
+			}
+		})
+	}
+}

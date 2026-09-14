@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -190,4 +191,21 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return d, nil
+}
+
+// PanelPort is the port the API listens on, as a number.
+//
+// The firewall needs it: whatever else an operator closes, the port they are
+// reading the panel through has to stay open, or the next change locks them
+// out with no way back in.
+func (c *Config) PanelPort() int {
+	_, port, err := net.SplitHostPort(c.ListenAddr)
+	if err != nil {
+		return 2222
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n <= 0 || n > 65535 {
+		return 2222
+	}
+	return n
 }

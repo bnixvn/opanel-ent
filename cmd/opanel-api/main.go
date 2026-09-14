@@ -27,6 +27,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
+	"github.com/bnixvn/opanel-ent/internal/security"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/tlsx"
 	"github.com/bnixvn/opanel-ent/internal/version"
@@ -90,7 +91,8 @@ func run(cfg *config.Config, log *slog.Logger) error {
 	fileSvc := filemanager.New(database, ac, log)
 	backupSvc := backups.New(database, ac, log)
 	wpSvc := wordpress.New(database, ac, dbSvc, log)
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, log)
+	fwSvc := security.NewFirewall(database, ac, cfg.PanelPort(), log)
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, fwSvc, log)
 	api.StartBackgroundTasks(ctx)
 
 	srv := api.HTTPServer()

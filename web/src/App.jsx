@@ -9,6 +9,8 @@ import Files from './pages/Files.jsx';
 import Backups from './pages/Backups.jsx';
 import Ssl from './pages/Ssl.jsx';
 import Logs from './pages/Logs.jsx';
+import Firewall from './pages/Firewall.jsx';
+import Waf from './pages/Waf.jsx';
 import Users from './pages/Users.jsx';
 import Packages from './pages/Packages.jsx';
 import Php from './pages/Php.jsx';
@@ -27,6 +29,10 @@ const MENU = [
     { to: '/backups', label: 'Backups' },
     { to: '/ssl', label: 'SSL' },
     { to: '/logs', label: 'Logs' },
+  ] },
+  { group: 'Security', roles: ['admin'], items: [
+    { to: '/security/firewall', label: 'Firewall', roles: ['admin'] },
+    { to: '/security/waf', label: 'WAF', roles: ['admin'] },
   ] },
   { group: 'Server', roles: ['admin', 'reseller'], items: [
     { to: '/users', label: 'Users', roles: ['admin', 'reseller'] },
@@ -172,6 +178,8 @@ export default function App() {
             )}
             {role === 'admin' && (
               <>
+                <Route path="/security/firewall" element={<Firewall />} />
+                <Route path="/security/waf" element={<Waf />} />
                 <Route path="/php" element={<Php />} />
                 <Route path="/system" element={<System />} />
                 <Route path="/settings" element={<Settings />} />

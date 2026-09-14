@@ -203,6 +203,13 @@ type ServerConfig struct {
 	AdminEmail  string
 	// PanelManagedComment is written at the top of every generated file.
 	PanelManagedComment string
+	// WAFRulesFile is the ModSecurity configuration to load, empty when the
+	// engine or its rules are not installed.
+	//
+	// Passed in rather than probed by the renderer: a renderer that looks at
+	// the filesystem produces different output on different machines, which
+	// makes it untestable and makes a config change depend on where it ran.
+	WAFRulesFile string
 }
 
 // DefaultServerConfig returns the settings a fresh install uses.

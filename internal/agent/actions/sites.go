@@ -306,7 +306,13 @@ func registerSites(r *agent.Registry, deps Deps) {
 				}
 			}
 		}
-		rendered, err := deps.Webserver.Render(in.Config, sites)
+		// The agent decides whether the WAF is loadable, because it is the
+		// side that can see the files. The API asks for the configuration it
+		// wants; the host says what it actually has.
+		cfg := in.Config
+		cfg.WAFRulesFile = wafRulesIfInstalled()
+
+		rendered, err := deps.Webserver.Render(cfg, sites)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -493,4 +499,20 @@ func placeholderPage(domain string) []byte {
 </body>
 </html>
 `)
+}
+
+// wafRulesIfInstalled returns the ModSecurity configuration path when both
+// the engine and its rules are present, and "" otherwise.
+//
+// Naming a module the webserver does not have stops it starting, so an
+// operator who has not installed the rules gets a working server rather than
+// a broken one.
+func wafRulesIfInstalled() string {
+	if _, err := os.Stat(modSecModule); err != nil {
+		return ""
+	}
+	if _, err := os.Stat(wafRulesFile); err != nil {
+		return ""
+	}
+	return wafRulesFile
 }

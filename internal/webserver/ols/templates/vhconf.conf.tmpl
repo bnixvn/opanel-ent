@@ -5,6 +5,14 @@
 # Owner: {{ .Site.OwnerUser }}
 #
 
+{{ if .ServeWAF -}}
+# The web application firewall, switched on for this site. The rule set and
+# the mode are server-wide; this only opts in.
+module mod_security {
+    modsecurity              on
+}
+
+{{ end -}}
 docRoot                       {{ .EffectiveDocRoot }}
 enableGzip                    1
 enableBr                      1

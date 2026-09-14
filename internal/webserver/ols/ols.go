@@ -106,6 +106,11 @@ type siteView struct {
 	// ServePHP is NeedsPHP narrowed by suspension -- a suspended site gets no
 	// interpreter at all.
 	ServePHP bool
+	// ServeWAF is the site's WAF flag narrowed by whether the host has the
+	// engine. A vhost that switches on a module the server never loaded
+	// stops OpenLiteSpeed starting, which takes down every site on the
+	// machine rather than just this one.
+	ServeWAF bool
 
 	ACMEWebroot string
 
@@ -125,6 +130,12 @@ type mainView struct {
 	HasSSL          bool
 	DefaultCertFile string
 	DefaultKeyFile  string
+
+	// WAFAvailable is whether the engine exists on this host. The server
+	// block only loads it when it does; naming a module that is not there
+	// stops OpenLiteSpeed starting.
+	WAFAvailable bool
+	WAFRulesFile string
 
 	ACMEVhostName     string
 	ACMEWebroot       string
@@ -211,19 +222,22 @@ func (b *Backend) newSiteView(cfg webserver.ServerConfig, s webserver.Site) site
 	return siteView{
 		EffectiveDocRoot: docRoot,
 		ServePHP:         s.NeedsPHP() && !s.Suspended,
-		ACMEWebroot:      webserver.ACMEWebroot,
-		Site:             s,
-		Config:           cfg,
-		Name:             vhostName(s.Domain),
-		ConfigFileRel:    b.configFileRel(b.vhostConfPath(s.Domain)),
-		MapDomains:       strings.Join(s.Hostnames(), ", "),
-		AppName:          extAppName(s),
-		MaxConns:         maxConns,
-		MemSoftLimit:     memSoft,
-		MemHardLimit:     memHard,
-		ProcSoftLimit:    procSoft,
-		ProcHardLimit:    procHard,
-		RewriteRules:     rewriteRules(s.RewriteMode),
+		// A suspended site is serving a notice page, so there is nothing to
+		// protect and no reason to spend the engine on it.
+		ServeWAF:      s.WAFEnabled && !s.Suspended && cfg.WAFRulesFile != "",
+		ACMEWebroot:   webserver.ACMEWebroot,
+		Site:          s,
+		Config:        cfg,
+		Name:          vhostName(s.Domain),
+		ConfigFileRel: b.configFileRel(b.vhostConfPath(s.Domain)),
+		MapDomains:    strings.Join(s.Hostnames(), ", "),
+		AppName:       extAppName(s),
+		MaxConns:      maxConns,
+		MemSoftLimit:  memSoft,
+		MemHardLimit:  memHard,
+		ProcSoftLimit: procSoft,
+		ProcHardLimit: procHard,
+		RewriteRules:  rewriteRules(s.RewriteMode),
 	}
 }
 
@@ -260,6 +274,7 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 
 	mv := mainView{
 		Config: cfg, Sites: views, SSLSites: sslViews, HasSSL: len(sslViews) > 0,
+		WAFAvailable: cfg.WAFRulesFile != "", WAFRulesFile: cfg.WAFRulesFile,
 		ACMEVhostName:     webserver.ACMEVhostName,
 		ACMEWebroot:       webserver.ACMEWebroot,
 		ACMEConfigFileRel: b.configFileRel(b.acmeVhostConfPath()),

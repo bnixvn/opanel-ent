@@ -122,6 +122,16 @@ accessControl {
     deny
 }
 
+{{ if .WAFAvailable -}}
+# ModSecurity. The rules themselves live in a file the panel rewrites; the
+# engine is off here and switched on per vhost, so a site that does not want
+# it pays nothing.
+module mod_security {
+    modsecurity              on
+    modsecurity_rules_file   {{ .WAFRulesFile }}
+}
+
+{{ end -}}
 module cache {
     ls_enabled                   1
     checkPrivateCache            1

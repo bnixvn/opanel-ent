@@ -18,6 +18,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/filemanager"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
+	"github.com/bnixvn/opanel-ent/internal/security"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/wordpress"
 )
@@ -35,6 +36,7 @@ type Server struct {
 	files     *filemanager.Service
 	backups   *backups.Service
 	wordpress *wordpress.Service
+	firewall  *security.Firewall
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -43,7 +45,8 @@ type Server struct {
 
 // New builds the API server and its route table.
 func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service, fileSvc *filemanager.Service,
-	backupSvc *backups.Service, wpSvc *wordpress.Service, log *slog.Logger) *Server {
+	backupSvc *backups.Service, wpSvc *wordpress.Service, fwSvc *security.Firewall,
+	log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -59,6 +62,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		files:     fileSvc,
 		backups:   backupSvc,
 		wordpress: wpSvc,
+		firewall:  fwSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -196,6 +200,20 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
+				ar.Get("/firewall", s.handleFirewallList)
+				ar.Post("/firewall/rules", s.handleFirewallCreate)
+				ar.Delete("/firewall/rules/{id}", s.handleFirewallDelete)
+				ar.Post("/firewall/confirm", s.handleFirewallConfirm)
+				ar.Post("/firewall/sources", s.handleFirewallSourceCreate)
+				ar.Post("/firewall/sources/{id}/refresh", s.handleFirewallSourceRefresh)
+				ar.Delete("/firewall/sources/{id}", s.handleFirewallSourceDelete)
+
+				ar.Get("/waf", s.handleWAFStatus)
+				ar.Post("/waf/install", s.handleWAFInstall)
+				ar.Put("/waf", s.handleWAFConfigure)
+				ar.Get("/waf/events", s.handleWAFEvents)
+				ar.Post("/sites/{id}/waf", s.handleSiteWAF)
+
 				ar.Get("/certificates", s.handleCertList)
 				ar.Delete("/certificates", s.handleCertDelete)
 				ar.Get("/settings", s.handleSettings)
@@ -252,6 +270,31 @@ func (s *Server) StartBackgroundTasks(ctx context.Context) {
 	go s.purgeSessionsLoop(ctx)
 	go s.renewCertificatesLoop(ctx)
 	go s.backupScheduleLoop(ctx)
+	go s.blocklistRefreshLoop(ctx)
+}
+
+// blocklistRefreshLoop re-fetches the firewall's subscribed blocklists.
+//
+// Hourly, with each source deciding from its own interval whether it is due.
+// A feed that is unreachable is recorded against that source and does not
+// stop the others.
+func (s *Server) blocklistRefreshLoop(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			done, errs := s.firewall.RefreshDue(ctx)
+			for _, err := range errs {
+				s.log.Warn("httpapi: blocklist refresh", "err", err)
+			}
+			if done > 0 {
+				s.log.Info("httpapi: blocklists refreshed", "count", done)
+			}
+		}
+	}
 }
 
 // backupScheduleLoop fires due schedules and prunes what retention no longer
