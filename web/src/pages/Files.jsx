@@ -260,11 +260,6 @@ export default function Files({ me }) {
                 </span>
               ))}
             </div>
-            <div className="muted" style={{ fontSize: '.78rem', marginTop: '.15rem' }}>
-              Everything below is inside this account&apos;s home directory. A
-              website called example.com lives at{' '}
-              <code>{home || '/home/<user>'}/example.com/public_html</code>.
-            </div>
           </div>
           <div className="nowrap">
             <button

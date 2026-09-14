@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtDate } from '../api.js';
 import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
-import PhpSettings from './PhpSettings.jsx';
 
 export default function Sites({ me }) {
   const [sites, setSites] = useState([]);
@@ -13,7 +12,6 @@ export default function Sites({ me }) {
   const [installed, setInstalled] = useState(null);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
-  const [phpFor, setPhpFor] = useState(null);
 
   const staff = me.role === 'admin' || me.role === 'reseller';
 
@@ -44,6 +42,70 @@ export default function Sites({ me }) {
     });
   }
 
+  // createSite runs the whole sequence a new website usually needs, in the
+  // order that actually works: the site, then the certificate, then
+  // WordPress. WordPress bakes its address into the database at install time,
+  // so installing before the certificate exists means fixing the address by
+  // hand afterwards.
+  //
+  // Each step reports on its own and a failure does not undo what came
+  // before: a website whose certificate could not be issued because DNS has
+  // not propagated is still a website, and the SSL page can finish the job in
+  // a minute.
+  async function createSite({ domain, ownerID, version, wordpress, ssl }) {
+    msg.clear();
+    setBusy('new');
+    let site;
+    try {
+      const body = {
+        domain,
+        app_type: wordpress ? 'wordpress' : 'php',
+        php_version: version,
+        rewrite_mode: 'none',
+      };
+      if (staff && ownerID) body.owner_id = Number(ownerID);
+      site = await api.post('/sites', body);
+      msg.ok(`Created ${domain}`);
+    } catch (err) {
+      msg.fail(err);
+      setBusy(null);
+      await load();
+      return null;
+    }
+
+    const notes = [`Created ${domain}`];
+    if (ssl) {
+      msg.ok(`${domain} created. Requesting a certificate…`);
+      try {
+        await api.post(`/sites/${site.id}/certificate`, { force_https: true });
+        notes.push('certificate issued');
+      } catch (err) {
+        notes.push(`no certificate yet (${err.message})`);
+      }
+    }
+    if (wordpress) {
+      msg.ok(`${notes.join(', ')}. Installing WordPress — leave the page open.`);
+      try {
+        const res = await api.post(`/sites/${site.id}/wordpress`, {});
+        setInstalled(res.wordpress);
+        notes.push('WordPress installed');
+      } catch (err) {
+        notes.push(`WordPress not installed (${err.message})`);
+      }
+    }
+
+    // One closing line listing what happened, so a half-finished setup is
+    // obvious rather than something to discover later.
+    const failed = notes.some((n) => n.startsWith('no ') || n.includes('not installed'));
+    if (failed) msg.warn(notes.join('. ') + '.');
+    else msg.ok(notes.join(', ') + '.');
+
+    setBusy(null);
+    const rows = await load();
+    loadWordPress(rows);
+    return site;
+  }
+
   async function guard(fn, okText) {
     msg.clear();
     try {
@@ -65,7 +127,13 @@ export default function Sites({ me }) {
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
 
-      <NewSite php={php} owners={owners} staff={staff} me={me} onDone={guard} />
+      <NewSite
+        php={php}
+        owners={owners}
+        staff={staff}
+        me={me}
+        onCreate={createSite}
+      />
 
       {installed && (
         <Card title="WordPress is installed">
@@ -85,10 +153,6 @@ export default function Sites({ me }) {
           <Secret label="Password" value={installed.admin_password} />
           <button type="button" onClick={() => setInstalled(null)}>Close</button>
         </Card>
-      )}
-
-      {phpFor && (
-        <PhpSettings site={phpFor} onClose={() => setPhpFor(null)} />
       )}
 
       <Card
@@ -161,9 +225,6 @@ export default function Sites({ me }) {
                             <option value={s.owner_id}>{s.owner}</option>
                           )}
                         </select>
-                        <div className="muted" style={{ fontSize: '.75em' }}>
-                          <code>/home/{s.owner}/{s.domain}</code>
-                        </div>
                       </td>
                     )}
                     <td>
@@ -208,17 +269,6 @@ export default function Sites({ me }) {
                           >
                             {php.map((v) => <option key={v.version}>{v.version}</option>)}
                           </select>
-                          <div>
-                            <button
-                              type="button"
-                              className="link"
-                              onClick={() => setPhpFor(
-                                phpFor && phpFor.id === s.id ? null : s,
-                              )}
-                            >
-                              Settings
-                            </button>
-                          </div>
                         </>
                       )}
                     </td>
@@ -380,11 +430,13 @@ function WordPressCell({ site, status, busy, onInstall }) {
   );
 }
 
-function NewSite({ php, owners, staff, me, onDone }) {
+function NewSite({ php, owners, staff, me, onCreate }) {
   const [domain, setDomain] = useState('');
-  const [type, setType] = useState('wordpress');
   const [version, setVersion] = useState('');
   const [owner, setOwner] = useState('');
+  const [wordpress, setWordpress] = useState(false);
+  const [ssl, setSsl] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   // Only accounts with a home directory can own a website, because that is
   // where its files go. Staff accounts have none, so offering "me" to an
@@ -407,13 +459,18 @@ function NewSite({ php, owners, staff, me, onDone }) {
     <Card title="New website">
       <form
         className="row"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          const body = { domain: domain.trim(), app_type: type };
-          if (type !== 'static') body.php_version = version;
-          if (staff) body.owner_id = Number(owner);
-          onDone(() => api.post('/sites', body), `Created ${body.domain}`);
-          setDomain('');
+          setBusy(true);
+          const created = await onCreate({
+            domain: domain.trim(),
+            ownerID: owner,
+            version,
+            wordpress,
+            ssl,
+          });
+          setBusy(false);
+          if (created) setDomain('');
         }}
       >
         <div className="field">
@@ -440,22 +497,9 @@ function NewSite({ php, owners, staff, me, onDone }) {
             </select>
           </div>
         )}
-        <div className="field" style={{ flex: '0 0 10rem' }}>
-          <label htmlFor="nsType">Type</label>
-          <select id="nsType" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="wordpress">WordPress</option>
-            <option value="php">PHP</option>
-            <option value="static">Static</option>
-          </select>
-        </div>
         <div className="field" style={{ flex: '0 0 7rem' }}>
           <label htmlFor="nsPhp">PHP</label>
-          <select
-            id="nsPhp"
-            value={version}
-            disabled={type === 'static'}
-            onChange={(e) => setVersion(e.target.value)}
-          >
+          <select id="nsPhp" value={version} onChange={(e) => setVersion(e.target.value)}>
             {php.map((v) => <option key={v.version}>{v.version}</option>)}
           </select>
         </div>
@@ -463,10 +507,28 @@ function NewSite({ php, owners, staff, me, onDone }) {
           <button
             type="submit"
             className="primary"
-            disabled={staff && eligible.length === 0}
+            disabled={busy || (staff && eligible.length === 0)}
           >
-            Create
+            {busy ? 'Working…' : 'Create'}
           </button>
+        </div>
+        <div className="checks" style={{ flexBasis: '100%', gap: '.2rem 1.4rem' }}>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={ssl}
+              onChange={(e) => setSsl(e.target.checked)}
+            />
+            Get an SSL certificate
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={wordpress}
+              onChange={(e) => setWordpress(e.target.checked)}
+            />
+            Install WordPress
+          </label>
         </div>
         <p className="muted" style={{ fontSize: '.83rem', flexBasis: '100%', margin: '.4rem 0 0' }}>
           {staff && eligible.length === 0 ? (
@@ -474,8 +536,10 @@ function NewSite({ php, owners, staff, me, onDone }) {
               live in its owner&apos;s home directory, and staff accounts have none.</>
           ) : (
             <>
-              The files go in the owner&apos;s home directory:{' '}
-              <code>/home/{ownerName}/{domain.trim() || 'example.com'}/public_html</code>
+              Files go to{' '}
+              <code>/home/{ownerName}/{domain.trim() || 'example.com'}/public_html</code>.
+              {ssl && ' The certificate needs this domain already pointing at this server;'}
+              {ssl && ' if it does not yet, the website is still created and the SSL page can issue one later.'}
             </>
           )}
         </p>

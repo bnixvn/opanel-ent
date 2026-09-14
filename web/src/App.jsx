@@ -214,7 +214,7 @@ export default function App() {
               <>
                 <Route path="/security/firewall" element={<Firewall />} />
                 <Route path="/security/waf" element={<Waf />} />
-                <Route path="/php" element={<Php />} />
+                <Route path="/php" element={<Php me={me} />} />
                 <Route path="/system" element={<System />} />
                 <Route path="/settings" element={<Settings />} />
               </>

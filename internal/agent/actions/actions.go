@@ -30,6 +30,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerSystemd(r)
 	registerPackages(r)
 	registerSites(r, deps)
+	registerPHPIni(r, deps)
 	registerDatabases(r)
 	registerQuota(r)
 	registerXFSQuota(r)

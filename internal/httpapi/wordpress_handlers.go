@@ -54,7 +54,6 @@ func (s *Server) handleWordPressInstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	actor := userFrom(r.Context())
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = titleFallback(site.Domain)
 	}
@@ -62,11 +61,15 @@ func (s *Server) handleWordPressInstall(w http.ResponseWriter, r *http.Request) 
 		req.AdminUser = adminUserFallback(site.OwnerUsername)
 	}
 	if strings.TrimSpace(req.AdminEmail) == "" {
-		req.AdminEmail = actor.Email
+		// The website owner's address, then whoever is installing it. A
+		// password reset for the customer's own WordPress should reach the
+		// customer, not the member of staff who happened to click the button.
+		req.AdminEmail = s.acmeContact(r, site.OwnerID)
 	}
 	if req.AdminEmail == "" {
 		writeError(w, http.StatusBadRequest, "bad_request",
-			"an administrator email address is required; WordPress uses it for password resets")
+			"an administrator email address is required; WordPress uses it for "+
+				"password resets. Set one on the owner's account, or on your own.")
 		return
 	}
 

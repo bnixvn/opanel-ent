@@ -210,6 +210,13 @@ func (s *Server) routes() http.Handler {
 			pr.Delete("/backups/{id}", s.handleBackupDelete)
 
 			pr.Get("/php/versions", s.handlePHPList)
+			// Readable by anyone signed in: these are the limits their
+			// websites run under. Writing is administrator-only below.
+			pr.Get("/php/versions/{version}/settings", s.handlePHPSettings)
+			// Websites that do not follow their version's settings. Listed
+			// here because this is the page that decides them.
+			pr.Get("/php/overrides", s.handlePHPOverrides)
+			pr.Delete("/sites/{id}/php", s.handlePHPOverrideClear)
 			pr.Get("/webserver/status", s.handleWebserverStatus)
 
 			// Panel users. A reseller may manage end users; the handlers
@@ -237,6 +244,7 @@ func (s *Server) routes() http.Handler {
 				ar.Get("/system/audit", s.handleAuditList)
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
+				ar.Put("/php/versions/{version}/settings", s.handlePHPSettingsSave)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
 				ar.Get("/firewall", s.handleFirewallList)
 				ar.Post("/firewall/rules", s.handleFirewallCreate)
