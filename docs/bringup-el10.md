@@ -1,9 +1,12 @@
 # Phase 0 — Kết quả bring-up trên AlmaLinux 10
 
 Máy khảo sát: `oe.sgd.ovh` — `160.236.192.84`, AlmaLinux **10.1** (Heliotrope Lion), kernel `6.12.0-124.55.3.el10_1.x86_64`, KVM, 2 vCPU / 1.9 GiB RAM / 20 GB SSD (xfs).
-Ngày chạy: 2026-09-14. Script: `installer/phase0-recon.sh`.
+Ngày chạy: 2026-09-14. Khảo sát bằng script recon của giai đoạn port,
+đã xoá cùng cây v1 — kết quả bên dưới là thứ đáng giữ, không phải script.
 
-Tài liệu này chốt các giả định của `docs/PLAN-v2-golang.md`. Mục nào lệch so với plan được đánh dấu **⚠ SỬA PLAN**.
+Tài liệu này chốt các giả định về nền tảng cho bản port EL10. Mục nào lệch
+so với dự đoán ban đầu được đánh dấu **⚠ SỬA PLAN** — plan đó đã thực thi
+xong và bị xoá, đánh dấu giữ lại vì nó chỉ ra chỗ tài liệu upstream sai.
 
 ---
 
@@ -103,7 +106,7 @@ Repo bật sẵn: `baseos`, `appstream`, `crb`, `extras`, `epel`.
 | `redis` | ❌ không có | Đúng như plan |
 | `nftables` | có 1.1.5 | ✅ |
 | `iptables` | ❌ không có | Lệnh `iptables` đến từ `iptables-nft` |
-| `iptables-nft` | có 1.8.11 | Vẫn còn, nhưng v2 không dùng |
+| `iptables-nft` | có 1.8.11 | Vẫn còn, nhưng panel không dùng |
 | `ipset` | có 7.22 | Vẫn còn, không dùng |
 | `firewalld` | có, **chưa cài** | Máy sạch, không phải disable gì |
 | `mariadb-server` (AppStream) | 3:10.11.18 | **Không phải 11.x** → bắt buộc dùng repo MariaDB |
@@ -114,7 +117,7 @@ Repo bật sẵn: `baseos`, `appstream`, `crb`, `extras`, `epel`.
 | `dnf-automatic` | đã cài sẵn | |
 | `quota` | đã cài sẵn | |
 | `clamav` | có 1.4.6 | EPEL |
-| `certbot` | có 4.2.0 | Không dùng — v2 dùng lego in-process |
+| `certbot` | có 4.2.0 | Không dùng — panel dùng lego in-process |
 | `policycoreutils-python-utils` | có | Cần nếu bật SELinux (cung cấp `semanage`, `audit2allow`) |
 | `lsphp{NN}-ioncube` | **có** | ⚠ Xem mục 6 |
 

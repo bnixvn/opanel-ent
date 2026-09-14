@@ -5,8 +5,8 @@ and **MariaDB**. Three static Go binaries and an embedded web interface: no
 runtime, no interpreter, nothing to keep up to date beside the panel itself.
 
 > Forked from [OPanel](https://github.com/bnixvn/opanel) at v1.6.0 and rewritten
-> in Go. The Python implementation is gone from this repository; its history is
-> in the fork point and in `docs/PLAN-v2-golang.md`.
+> in Go. Nothing of the Python implementation remains here; it is in the fork
+> point if anyone ever needs it.
 
 ## How it is put together
 
@@ -150,7 +150,7 @@ internal/
   platform/        thin wrappers over the host: users, packages, quota, pty
 web/               the interface's source; built output is committed
 modules/servers/   WHMCS provisioning module
-docs/              design notes and the migration record
+docs/              what is not built yet, and notes on the platform
 ```
 
 ## Licence
