@@ -197,7 +197,7 @@ func (s *Service) ensureDatabase(ctx context.Context, ownerID int64, suffix stri
 // be written with whatever this returns, and a password nobody knows is worse
 // than a rotated one.
 func (s *Service) ensureUser(ctx context.Context, ownerID int64, suffix string) (*db.DBUser, string, error) {
-	dbUser, password, err := s.databases.CreateUser(ctx, ownerID, suffix)
+	dbUser, password, err := s.databases.CreateUser(ctx, ownerID, suffix, "")
 	if err == nil {
 		return dbUser, password, nil
 	}

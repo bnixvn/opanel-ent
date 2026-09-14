@@ -267,18 +267,27 @@ export default function Databases({ me }) {
 
 function NewDatabase({ staff, owners, me, onCreated, onDone }) {
   const [name, setName] = useState('');
+  const [user, setUser] = useState('');
+  const [password, setPassword] = useState('');
   const [owner, setOwner] = useState('');
+
+  // The owner's name is prefixed by the server, so the field shows what will
+  // actually be created rather than the half of it the form collects.
+  const prefix = `${staffOwnerName(staff, owners, owner, me)}_`;
 
   return (
     <form
-      className="row"
       onSubmit={async (e) => {
         e.preventDefault();
         const body = { suffix: name.trim() };
+        if (user.trim()) body.user = user.trim();
+        if (password) body.password = password;
         if (staff && owner) body.owner_id = Number(owner);
         const res = await onDone(() => api.post('/databases', body), `Created ${name.trim()}`);
-        setName('');
         if (res) {
+          setName('');
+          setUser('');
+          setPassword('');
           onCreated({
             database: res.database ? res.database.name : res.name,
             username: res.user ? res.user.username : '',
@@ -288,30 +297,100 @@ function NewDatabase({ staff, owners, me, onCreated, onDone }) {
         }
       }}
     >
-      <div className="field">
-        <label htmlFor="ndName">Name</label>
-        <input
-          id="ndName"
-          placeholder="shop"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </div>
-      {staff && (
-        <div className="field" style={{ flex: '0 0 11rem' }}>
-          <label htmlFor="ndOwner">Owner</label>
-          <select id="ndOwner" value={owner} onChange={(e) => setOwner(e.target.value)}>
-            <option value="">{me.username} (me)</option>
-            {owners.filter((u) => u.linux_uid).map((u) => (
-              <option key={u.id} value={u.id}>{u.username}</option>
-            ))}
-          </select>
+      <div className="row">
+        <div className="field">
+          <label htmlFor="ndName">Database name</label>
+          <Prefixed prefix={prefix}>
+            <input
+              id="ndName"
+              placeholder="shop"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Prefixed>
         </div>
-      )}
-      <div>
-        <button type="submit" className="primary">Create database and account</button>
+        <div className="field">
+          <label htmlFor="ndUser">
+            Database user
+            <Hint>Left empty, the account takes the database&apos;s own name.</Hint>
+          </label>
+          <Prefixed prefix={prefix}>
+            <input
+              id="ndUser"
+              placeholder={name || 'shop'}
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+            />
+          </Prefixed>
+        </div>
+        {staff && (
+          <div className="field" style={{ flex: '0 0 11rem' }}>
+            <label htmlFor="ndOwner">Owner</label>
+            <select id="ndOwner" value={owner} onChange={(e) => setOwner(e.target.value)}>
+              <option value="">{me.username} (me)</option>
+              {owners.filter((u) => u.linux_uid).map((u) => (
+                <option key={u.id} value={u.id}>{u.username}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      <div className="row">
+        <div className="field">
+          <label htmlFor="ndPass">
+            Password
+            <Hint>
+              12 to 128 characters: letters, digits, underscore or hyphen.
+              Left empty, the panel invents one.
+            </Hint>
+          </label>
+          <div className="withbutton">
+            <input
+              id="ndPass"
+              type="text"
+              placeholder="generated for you"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button type="button" onClick={() => setPassword(generatePassword())}>
+              Generate
+            </button>
+          </div>
+        </div>
+        <div>
+          <button type="submit" className="primary">Create database</button>
+        </div>
       </div>
     </form>
   );
+}
+
+// Prefixed shows the owner prefix the server will add, attached to the front
+// of the field so the name in the box is the name that gets created.
+function Prefixed({ prefix, children }) {
+  return (
+    <div className="prefixed">
+      <span>{prefix}</span>
+      {children}
+    </div>
+  );
+}
+
+function staffOwnerName(staff, owners, ownerID, me) {
+  if (!staff || !ownerID) return me.username;
+  const found = owners.find((u) => String(u.id) === String(ownerID));
+  return found ? found.username : me.username;
+}
+
+// generatePassword draws from the alphabet the database server accepts.
+// crypto.getRandomValues rather than Math.random: this is a credential, and
+// the modulo bias of a 62-character alphabet over 256 is small enough not to
+// matter beside the difference between a CSPRNG and a seeded one.
+function generatePassword() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
 }

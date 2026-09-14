@@ -106,6 +106,12 @@ type createDatabaseRequest struct {
 	// WithoutUser skips the matching account, for the caller that wants to
 	// attach an existing one instead.
 	WithoutUser bool `json:"without_user,omitempty"`
+	// User names the account created alongside, without the owner prefix.
+	// Empty means the same suffix as the database, which is what somebody
+	// who did not think about it wants.
+	User string `json:"user,omitempty"`
+	// Password for that account. Empty means the panel invents one.
+	Password string `json:"password,omitempty"`
 }
 
 func (s *Server) handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
@@ -138,11 +144,15 @@ func (s *Server) handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbUser, password, err := s.databases.CreateUser(r.Context(), owner, suffix)
+	account := req.User
+	if account == "" {
+		account = suffix
+	}
+	dbUser, password, err := s.databases.CreateUser(r.Context(), owner, account, req.Password)
 	if err != nil {
 		// The database exists and is reported, because rolling it back would
 		// throw away a name the customer may already have typed elsewhere.
-		s.audit(r, "database.user.create", suffix, false, err.Error())
+		s.audit(r, "database.user.create", account, false, err.Error())
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"database": viewDatabase(rec),
 			"warning":  "the database was created but its account was not: " + err.Error(),
@@ -228,6 +238,8 @@ func (s *Server) handleDatabaseDelete(w http.ResponseWriter, r *http.Request) {
 type createDBUserRequest struct {
 	Username string `json:"username"`
 	OwnerID  int64  `json:"owner_id,omitempty"`
+	// Password is optional; empty means the panel invents one.
+	Password string `json:"password,omitempty"`
 }
 
 func (s *Server) handleDBUserCreate(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +248,7 @@ func (s *Server) handleDBUserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFrom(r.Context())
-	rec, password, err := s.databases.CreateUser(r.Context(), ownerFor(u, req.OwnerID), req.Username)
+	rec, password, err := s.databases.CreateUser(r.Context(), ownerFor(u, req.OwnerID), req.Username, req.Password)
 	if err != nil {
 		s.audit(r, "database.user.create", req.Username, false, err.Error())
 		s.databaseError(w, err)

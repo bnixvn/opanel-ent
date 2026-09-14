@@ -142,7 +142,10 @@ func (s *Service) DeleteDatabase(ctx context.Context, id int64) error {
 
 // CreateUser creates a database account and returns its generated password,
 // which is shown once and never stored.
-func (s *Service) CreateUser(ctx context.Context, ownerID int64, suffix string) (*db.DBUser, string, error) {
+// A blank password is generated here rather than refused: most callers have
+// no opinion about it, and one the panel invents is better than one a person
+// picks under time pressure.
+func (s *Service) CreateUser(ctx context.Context, ownerID int64, suffix, password string) (*db.DBUser, string, error) {
 	_, username, err := s.resolveOwner(ctx, ownerID, suffix, dbms.MaxUserName)
 	if err != nil {
 		return nil, "", err
@@ -153,9 +156,10 @@ func (s *Service) CreateUser(ctx context.Context, ownerID int64, suffix string) 
 		return nil, "", err
 	}
 
-	password, err := GeneratePassword()
-	if err != nil {
-		return nil, "", err
+	if password == "" {
+		if password, err = GeneratePassword(); err != nil {
+			return nil, "", err
+		}
 	}
 	if _, err := agentclient.Call[struct{}](ctx, s.agent, "dbuser.create", 1,
 		actions.DBUserPasswordRequest{Username: username, Password: password}); err != nil {
