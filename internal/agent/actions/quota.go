@@ -19,7 +19,7 @@ type DiskUsageRequest struct {
 
 // Validate checks the account name.
 func (r *DiskUsageRequest) Validate() error {
-	if !linuxuser.ValidName(r.Username) {
+	if !linuxuser.PlausibleName(r.Username) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Username)
 	}
 	return nil

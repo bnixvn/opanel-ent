@@ -121,7 +121,7 @@ func (r *SiteProvisionRequest) Validate() error {
 	if !webserver.ValidDomain(r.Domain) {
 		return fmt.Errorf("domain %q is not a valid hostname", r.Domain)
 	}
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("owner %q is not an acceptable account name", r.Owner)
 	}
 	home := linuxuser.Home(r.Owner)

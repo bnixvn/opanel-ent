@@ -512,8 +512,23 @@ dl.kv dd { margin: 0; }
 .terminalbar .dot.connecting { background: var(--warn); }
 .terminalbar .dot.closed { background: var(--bad); }
 /* The emulator measures itself against this box, so it needs a height that
-   does not depend on its own content. */
-.terminalbody { height: 24rem; padding: 0.4rem; background: #16191d; }
+   does not depend on its own content. The padding is on the emulator rather
+   than here: given to the box, it becomes a band of background the terminal
+   does not draw on, which reads as a border inside the black. */
+.terminalbody { height: 24rem; background: #16191d; }
+.terminalbody .xterm { height: 100%; padding: 0.45rem; }
+/* xterm puts focus on a hidden textarea, so the ring the browser draws lands
+   on the wrapper and outlines the whole terminal. */
+.terminalbody :focus, .terminalbody :focus-visible { outline: none; }
+/* The scroll area's native scrollbar is a light strip down the side of a
+   black rectangle, which is most of what looked like a frame. */
+.terminalbody .xterm-viewport { scrollbar-width: thin; scrollbar-color: #3a4150 transparent; }
+.terminalbody .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.terminalbody .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.terminalbody .xterm-viewport::-webkit-scrollbar-thumb {
+  background: #3a4150;
+  border-radius: 4px;
+}
 @media (max-width: 46rem) {
   .terminalbody { height: 16rem; }
 }

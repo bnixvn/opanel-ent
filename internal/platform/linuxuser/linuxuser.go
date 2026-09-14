@@ -168,7 +168,7 @@ func create(ctx context.Context, username string) (*Account, error) {
 // Delete removes an account. The home directory goes with it only when
 // removeHome is set, so an accidental delete does not destroy customer data.
 func Delete(ctx context.Context, username string, removeHome bool) error {
-	if !ValidName(username) {
+	if !PlausibleName(username) {
 		return fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	acct, err := Lookup(username)
@@ -213,7 +213,7 @@ func Delete(ctx context.Context, username string, removeHome bool) error {
 
 // SetPassword sets the account password, used for SFTP access.
 func SetPassword(ctx context.Context, username, password string) error {
-	if !ValidName(username) {
+	if !PlausibleName(username) {
 		return fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	if password == "" {
@@ -512,6 +512,18 @@ func Managed(username string) (bool, error) {
 }
 
 // PlausibleName reports whether a name is the right shape for a Linux
-// account, without judging whether it may be used. Callers that are about to
-// change an existing account want this; callers creating one want ValidName.
+// account, without judging whether it may be used.
+//
+// This is the check for anything acting on an account that already exists,
+// and ValidName is the check for choosing a new one. The distinction matters
+// because the reserved list inside ValidName answers "may a customer be
+// called this", which is a question about names being handed out -- and
+// applying it to an account the panel itself made means refusing to list,
+// back up, schedule cron for or change the password of an operator called
+// admin.
+//
+// Nothing is given up by the swap. The property these callers actually need
+// is that a name cannot carry a path or a shell metacharacter into a command
+// or a directory, and that is the pattern, which both share: lowercase
+// letters, digits, underscore and hyphen, starting with a letter.
 func PlausibleName(n string) bool { return namePattern.MatchString(n) }

@@ -31,10 +31,10 @@ type SiteMoveRequest struct {
 
 // Validate checks both accounts and the site name.
 func (r *SiteMoveRequest) Validate() error {
-	if !linuxuser.ValidName(r.From) {
+	if !linuxuser.PlausibleName(r.From) {
 		return fmt.Errorf("%q is not an acceptable account name", r.From)
 	}
-	if !linuxuser.ValidName(r.To) {
+	if !linuxuser.PlausibleName(r.To) {
 		return fmt.Errorf("%q is not an acceptable account name", r.To)
 	}
 	if r.From == r.To {

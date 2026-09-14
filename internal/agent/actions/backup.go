@@ -59,7 +59,7 @@ type BackupCreateRequest struct {
 
 // Validate checks the account, the file name and the database names.
 func (r *BackupCreateRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if !backupNamePattern.MatchString(r.Name) || !strings.HasSuffix(r.Name, backuparchive.Extension) {
@@ -93,7 +93,7 @@ type BackupPathRequest struct {
 
 // Validate checks the account and the file name.
 func (r *BackupPathRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if !backupNamePattern.MatchString(r.Name) {

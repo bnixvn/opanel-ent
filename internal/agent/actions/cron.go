@@ -20,7 +20,7 @@ type CronRequest struct {
 
 // Validate checks the account name.
 func (r *CronRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	return nil
@@ -40,7 +40,7 @@ type CronWriteRequest struct {
 // writes the file: a line the panel got wrong would run as the customer, on
 // a schedule, for ever.
 func (r *CronWriteRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if len(r.Text) > 256<<10 {

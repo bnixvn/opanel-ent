@@ -62,7 +62,7 @@ type WPInstallRequest struct {
 
 // Validate checks everything before a single file is written.
 func (r *WPInstallRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if !phpmgr.ValidVersion(r.PHPVersion) {
@@ -132,7 +132,7 @@ type WPPathRequest struct {
 
 // Validate checks the account and that the root is inside its home.
 func (r *WPPathRequest) Validate() error {
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if !strings.HasPrefix(r.DocumentRoot, linuxuser.Home(r.Owner)+"/") || strings.Contains(r.DocumentRoot, "..") {

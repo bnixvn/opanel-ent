@@ -159,7 +159,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Site, erro
 	// cannot have one cannot own a website. Said here, before anything is
 	// created, because the alternative was the agent refusing the name
 	// "admin" several steps later with a message that explained nothing.
-	if !linuxuser.ValidName(owner.Username) {
+	if !linuxuser.PlausibleName(owner.Username) {
 		return nil, fmt.Errorf(
 			"%w: %q is a staff account with no home directory on the server. "+
 				"A website has to belong to a hosting account, because its files live "+
@@ -510,7 +510,7 @@ func (s *Service) ChangeOwner(ctx context.Context, siteID, newOwnerID int64) (*d
 	if err != nil {
 		return nil, err
 	}
-	if !linuxuser.ValidName(newOwner.Username) {
+	if !linuxuser.PlausibleName(newOwner.Username) {
 		return nil, fmt.Errorf(
 			"%w: %q is a staff account with no home directory to move the site into",
 			ErrOwnerNotEligible, newOwner.Username)

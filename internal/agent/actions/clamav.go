@@ -125,7 +125,7 @@ func (r *ClamQuarantineRequest) Validate() error {
 	default:
 		return fmt.Errorf("%q is not an operation", r.Op)
 	}
-	if !linuxuser.ValidName(r.Owner) {
+	if !linuxuser.PlausibleName(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	home := linuxuser.Home(r.Owner)
