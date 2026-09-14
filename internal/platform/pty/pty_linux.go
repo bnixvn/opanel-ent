@@ -27,6 +27,10 @@ type Terminal struct {
 // Options describe the process to start.
 type Options struct {
 	Path string
+	// Args is the whole argv, argv[0] included. Spelled out because
+	// exec.Command supplies argv[0] itself, so passing the rest here would
+	// put the first real argument where the program name belongs -- and a
+	// shell told its own name is "--rcfile" reports a missing file.
 	Args []string
 	Dir  string
 	Env  []string
@@ -79,7 +83,10 @@ func Start(opts Options) (*Terminal, error) {
 		return nil, fmt.Errorf("pty: chown %s: %w", name, err)
 	}
 
-	cmd := exec.Command(opts.Path, opts.Args...)
+	cmd := exec.Command(opts.Path)
+	if len(opts.Args) > 0 {
+		cmd.Args = opts.Args
+	}
 	cmd.Dir = opts.Dir
 	cmd.Env = opts.Env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty

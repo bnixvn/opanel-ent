@@ -127,6 +127,16 @@ func run(log *slog.Logger, socketPath, apiUser, socketGroup, extraUIDs string) e
 		log.Info("opanel-agent: repaired home ownership", "accounts", fixed)
 	}
 
+	// The terminal's command list, rebuilt on every start so a change to it
+	// -- or to which of those commands are installed -- takes effect without
+	// anybody having to remember a second step.
+	if linked, err := agent.BuildShellPolicy(); err != nil {
+		log.Error("opanel-agent: could not build the terminal command list", "err", err)
+	} else {
+		log.Info("opanel-agent: terminal command list built",
+			"available", len(linked), "of", len(agent.ShellCommands))
+	}
+
 	// Terminals get their own listener beside the action socket, because a
 	// shell is a stream and the action protocol is not.
 	termSrv := agent.NewTerminalServer(agent.TerminalOptions{

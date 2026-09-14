@@ -491,6 +491,9 @@ dl.kv dd { margin: 0; }
   .jobtarget { max-width: 100%; }
 }
 
+.cmdlist { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.cmdlist code { font-size: 0.78rem; }
+
 /* ---------- terminal ---------- */
 
 .terminal { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }

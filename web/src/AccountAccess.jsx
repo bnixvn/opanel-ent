@@ -42,9 +42,27 @@ export function TerminalCard() {
           <Terminal username={status.username} onClose={() => setOpen(false)} />
         </Suspense>
       ) : (
-        <p className="muted" style={{ margin: 0, fontSize: '.85rem' }}>
-          Runs as <code>{status.username}</code>, in that account&apos;s home directory.
-        </p>
+        <>
+          <p className="muted" style={{ margin: 0, fontSize: '.85rem' }}>
+            Runs as <code>{status.username}</code>, in that account&apos;s home
+            directory.
+          </p>
+          {status.commands && (
+            <>
+              <h3 className="subhead">
+                Commands
+                <Hint>
+                  Anything else is refused. It keeps the rest of the system out
+                  of reach of a mistake; it is not a sandbox, because php, node
+                  and git run whatever they are given.
+                </Hint>
+              </h3>
+              <div className="cmdlist">
+                {status.commands.map((c) => <code key={c}>{c}</code>)}
+              </div>
+            </>
+          )}
+        </>
       )}
     </Card>
   );
@@ -118,8 +136,12 @@ export function SFTPCard() {
       <h3 className="subhead">
         Extra credentials
         <Hint>
-          Each one is a separate login with its own password that can be
-          withdrawn on its own. They all reach the same files.
+          As many as you need, up to {data.limit || 20}. Each is a separate
+          login with its own password, withdrawn on its own without touching
+          the others. Every one of them has the account&apos;s own
+          permissions: the same files, read and write, confined to this home
+          directory and nothing outside it. None of them can open a shell,
+          and none can be limited to a single website.
         </Hint>
       </h3>
 

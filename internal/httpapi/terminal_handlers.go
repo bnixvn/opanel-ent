@@ -34,6 +34,9 @@ func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"available": true,
 		"username":  u.Username,
+		// What the session may run, so the page can say so before somebody
+		// types something and is told no.
+		"commands": agent.ShellCommands,
 	})
 }
 

@@ -230,16 +230,19 @@ func (s *TerminalServer) run(conn net.Conn, br *bufio.Reader, acct *linuxuser.Ac
 	shell := firstShell()
 	term, err := pty.Start(pty.Options{
 		Path: shell,
-		// A login shell, so the account's own profile runs and the prompt
-		// looks like the one they would get over SSH.
-		Args: []string{"-" + filepath.Base(shell)},
+		// Interactive with our own startup file rather than a login shell.
+		// A login shell reads /etc/profile and then the account's own
+		// ~/.bash_profile, and the account owns that file -- so the last
+		// word on PATH would belong to the person the PATH is there to
+		// bound. --rcfile also replaces ~/.bashrc, for the same reason.
+		Args: []string{filepath.Base(shell), "--rcfile", ShellRC(), "-i"},
 		Dir:  acct.Home,
 		Env: []string{
 			"HOME=" + acct.Home,
 			"USER=" + acct.Username,
 			"LOGNAME=" + acct.Username,
 			"SHELL=" + shell,
-			"PATH=/usr/local/bin:/usr/bin:/bin",
+			"PATH=" + ShellBinDir(),
 			"TERM=xterm-256color",
 			"LANG=C.UTF-8",
 		},
