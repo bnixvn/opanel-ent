@@ -28,12 +28,30 @@ import { FEATURES } from './features.js';
 // The sidebar is the four headings and nothing else. Everything under them
 // is one click away on the dashboard, which is what it is for; a sidebar
 // long enough to need reading is one people stop reading.
+//
+// `group` names the block of FEATURES an entry stands for. A heading opens
+// that block rather than the first thing in it: clicking Server to land on
+// Users is an answer to a question nobody asked.
 const MENU = [
   { to: '/', label: 'Dashboard', end: true },
-  { to: '/sites', label: 'Main' },
-  { to: '/users', label: 'Server', roles: ['admin', 'reseller'] },
-  { to: '/account', label: 'Account' },
+  { to: '/main', label: 'Main', group: 'Main' },
+  { to: '/server', label: 'Server', group: 'Server', roles: ['admin', 'reseller'] },
+  { to: '/account', label: 'Account', group: 'Account' },
 ];
+
+// groupOf says which block a path belongs to, so the heading above a page
+// stays lit while you are on it. Longest match first, or /security/malware
+// would be answered by whichever of /security* came first in the list.
+function groupOf(path) {
+  for (const g of FEATURES) {
+    const hit = g.items
+      .slice()
+      .sort((a, b) => b.to.length - a.to.length)
+      .find((i) => path === i.to || path.startsWith(i.to + '/'));
+    if (hit) return g.group;
+  }
+  return null;
+}
 
 function visible(entry, role) {
   return !entry.roles || entry.roles.includes(role);
@@ -103,6 +121,7 @@ export default function App() {
 
   const role = me.role;
   const title = pageTitle(location.pathname);
+  const openGroup = groupOf(location.pathname);
 
   return (
     <div className="shell">
@@ -116,7 +135,9 @@ export default function App() {
             key={item.to}
             to={item.to}
             end={item.end}
-            className={({ isActive }) => (isActive ? 'active' : undefined)}
+            className={({ isActive }) => (
+              isActive || (item.group && item.group === openGroup) ? 'active' : undefined
+            )}
           >
             {item.label}
           </NavLink>
@@ -192,6 +213,8 @@ export default function App() {
                   panel can do, grouped the way the sidebar is. The numbers it
                   used to restate are on the pages that own them. */}
               <Route path="/" element={<Dashboard me={me} />} />
+              <Route path="/main" element={<Dashboard me={me} only="Main" />} />
+              <Route path="/server" element={<Dashboard me={me} only="Server" />} />
               <Route path="/sites" element={<Sites me={me} />} />
               <Route path="/sites/*" element={<Sites me={me} />} />
               <Route path="/databases" element={<Databases me={me} />} />
@@ -239,6 +262,8 @@ export default function App() {
 
 function pageTitle(path) {
   if (path === '/') return 'Dashboard';
+  const heading = MENU.find((m) => m.to === path && m.group);
+  if (heading) return heading.label;
   // Longest match first, so /security/malware is not answered by /security.
   const all = FEATURES.flatMap((g) => g.items)
     .slice()

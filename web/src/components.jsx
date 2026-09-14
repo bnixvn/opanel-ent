@@ -7,9 +7,9 @@ export function Card({ title, children, actions }) {
   return (
     <section className="card">
       {(title || actions) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
-          {title && <h2 style={{ flex: 1, margin: '0 0 .8rem' }}>{title}</h2>}
-          {actions && <div style={{ marginBottom: '.8rem' }}>{actions}</div>}
+        <div className="cardhead">
+          {title && <h2>{title}</h2>}
+          {actions && <div className="cardactions">{actions}</div>}
         </div>
       )}
       {children}

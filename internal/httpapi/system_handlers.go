@@ -176,5 +176,15 @@ func (s *Server) handleSystemStats(w http.ResponseWriter, r *http.Request) {
 		s.agentError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	// What is hosted on the machine, alongside how hard it is working. The
+	// two belong together: a load figure means something different on a
+	// server with two accounts than on one with two hundred.
+	totals, err := s.db.ServerTotals(r.Context())
+	if err != nil {
+		s.log.Warn("httpapi: server totals", "err", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"host":   st,
+		"totals": totals,
+	})
 }

@@ -84,11 +84,9 @@ export default function WordPress({ me }) {
         actions={(
           <>
             {candidates.length > 0 && !installing && (
-              <>
-                <button type="button" className="primary" onClick={() => setInstalling(true)}>
-                  Install WordPress
-                </button>{' '}
-              </>
+              <button type="button" className="primary" onClick={() => setInstalling(true)}>
+                Install WordPress
+              </button>
             )}
             <Search value={query} onChange={setQuery} placeholder="Search domains…" />
           </>
@@ -98,7 +96,7 @@ export default function WordPress({ me }) {
           <Empty>
             {sites.length
               ? 'Nothing matches that search.'
-              : 'No WordPress installations found. Tick "Install WordPress" when you create a website.'}
+              : 'No WordPress installations yet.'}
           </Empty>
         ) : (
           <div className="scroll">

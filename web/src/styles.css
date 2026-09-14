@@ -340,6 +340,19 @@ a { color: var(--accent); }
   margin-bottom: 1rem;
 }
 .card h2 { margin: 0 0 0.8rem; font-size: 0.95rem; font-weight: 600; }
+
+/* A card's heading and its buttons share one line. Inputs are full-width by
+   default, so a search box in here would otherwise take the whole row and
+   push the buttons beside it onto a line of their own. */
+.cardhead { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.cardhead h2 { flex: 1; min-width: 8rem; }
+.cardactions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+.cardactions .search { width: 13rem; flex: 0 0 auto; }
 .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
 .field { flex: 1 1 10rem; }
 label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }

@@ -164,3 +164,27 @@ func (d *DB) UserResourceCounts(ctx context.Context, id int64) (sites, dbs int, 
 	err = d.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_databases WHERE owner_id = ?`, id).Scan(&dbs)
 	return sites, dbs, err
 }
+
+// ServerTotals is what exists on this server, regardless of who owns it.
+type ServerTotals struct {
+	Accounts  int `json:"accounts"`
+	Resellers int `json:"resellers"`
+	Sites     int `json:"sites"`
+	Databases int `json:"databases"`
+}
+
+// ServerTotals counts the hosting on this machine.
+//
+// Accounts counts end users only: an administrator is not a tenant, and
+// counting one would mean the figure never reads zero on a fresh server.
+func (d *DB) ServerTotals(ctx context.Context) (ServerTotals, error) {
+	var t ServerTotals
+	err := d.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM users WHERE role = 'end_user'),
+			(SELECT COUNT(*) FROM users WHERE role = 'reseller'),
+			(SELECT COUNT(*) FROM sites),
+			(SELECT COUNT(*) FROM db_databases)
+	`).Scan(&t.Accounts, &t.Resellers, &t.Sites, &t.Databases)
+	return t, err
+}

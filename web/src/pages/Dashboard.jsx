@@ -9,13 +9,18 @@ import Icon from '../icons.jsx';
 // The numbers it used to restate all live on the pages that own them, and a
 // screen that only repeats them is a click in the way. What is left is the
 // shortest description of a control panel there is: what it can do.
-export default function Dashboard({ me }) {
+//
+// `only` narrows it to one group, which is what a sidebar heading opens.
+export default function Dashboard({ me, only }) {
   const role = me.role;
   const allowed = (item) => !item.roles || item.roles.includes(role);
+  const groups = FEATURES
+    .filter((g) => !g.roles || g.roles.includes(role))
+    .filter((g) => !only || g.group === only);
 
   return (
     <>
-      {FEATURES.filter((g) => !g.roles || g.roles.includes(role)).map((group) => {
+      {groups.map((group) => {
         const items = group.items.filter(allowed);
         if (items.length === 0) return null;
         return (

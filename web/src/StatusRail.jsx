@@ -3,18 +3,24 @@ import { api, fmtBytes } from './api.js';
 
 // StatusRail is the column down the right of every page.
 //
-// Two questions it answers without anybody navigating anywhere: is the
-// machine in trouble, and how much of what I am paying for have I used. The
-// server half is staff-only, because on a shared box the load is mostly made
-// of other tenants' traffic.
+// What it shows depends on who is reading it, because the same figures are
+// not true of everybody. An administrator does not host websites under their
+// own login, so showing them a personal disk quota describes nothing; what
+// they want is the machine and what is on it. A reseller wants what they
+// have handed out against what they were allowed. Only an end user has a
+// package, and for them it is the only thing on this rail worth reading.
 
 const SERVER_EVERY = 10000;
 const USAGE_EVERY = 60000;
 
 export default function StatusRail({ me }) {
-  const staff = me.role === 'admin' || me.role === 'reseller';
+  const admin = me.role === 'admin';
+  const reseller = me.role === 'reseller';
+  const staff = admin || reseller;
+
   const [stats, setStats] = useState(null);
   const [usage, setUsage] = useState(null);
+  const [allowance, setAllowance] = useState(null);
 
   useEffect(() => {
     if (!staff) return undefined;
@@ -28,6 +34,7 @@ export default function StatusRail({ me }) {
   }, [staff]);
 
   useEffect(() => {
+    if (staff) return undefined;
     let live = true;
     const tick = () => api.get('/usage')
       .then((r) => { if (live) setUsage(r.usage); })
@@ -35,98 +42,137 @@ export default function StatusRail({ me }) {
     tick();
     const id = setInterval(tick, USAGE_EVERY);
     return () => { live = false; clearInterval(id); };
-  }, []);
+  }, [staff]);
+
+  useEffect(() => {
+    if (!reseller) return undefined;
+    let live = true;
+    api.get('/reseller')
+      .then((r) => { if (live) setAllowance(r.reseller); })
+      .catch(() => { if (live) setAllowance(null); });
+    return () => { live = false; };
+  }, [reseller]);
 
   return (
     <aside className="rail">
-      {staff && <ServerPanel stats={stats} />}
-      <AccountPanel me={me} usage={usage} />
+      {staff && <HostPanel host={stats && stats.host} />}
+      {admin && <TotalsPanel totals={stats && stats.totals} />}
+      {reseller && <AllowancePanel allowance={allowance} />}
+      {!staff && <AccountPanel usage={usage} />}
     </aside>
   );
 }
 
-function ServerPanel({ stats }) {
+function HostPanel({ host }) {
+  if (!host) return <Panel title="Server"><p className="railnote">…</p></Panel>;
   return (
-    <section>
-      <h2>Server</h2>
-      {!stats ? (
-        <p className="railnote">…</p>
-      ) : (
-        <>
-          <Meter
-            label="CPU"
-            value={stats.cpu_percent}
-            max={100}
-            text={`${Math.round(stats.cpu_percent)}%`}
-          />
-          <Meter
-            label="Memory"
-            value={stats.mem_used_mb}
-            max={stats.mem_total_mb}
-            text={`${mb(stats.mem_used_mb)} / ${mb(stats.mem_total_mb)}`}
-          />
-          <Meter
-            label="Disk"
-            value={stats.disk_used_mb}
-            max={stats.disk_total_mb}
-            text={`${mb(stats.disk_used_mb)} / ${mb(stats.disk_total_mb)}`}
-          />
-          {stats.swap_total_mb > 0 && (
-            <Meter
-              label="Swap"
-              value={stats.swap_used_mb}
-              max={stats.swap_total_mb}
-              text={`${mb(stats.swap_used_mb)} / ${mb(stats.swap_total_mb)}`}
-            />
-          )}
-          <dl className="railfacts">
-            <dt>Load</dt>
-            <dd>
-              {stats.load1.toFixed(2)}
-              {stats.cores > 0 && ` / ${stats.cores}`}
-            </dd>
-            <dt>Uptime</dt>
-            <dd>{uptime(stats.uptime_seconds)}</dd>
-          </dl>
-        </>
+    <Panel title="Server">
+      <Meter label="CPU" value={host.cpu_percent} max={100} text={`${Math.round(host.cpu_percent)}%`} />
+      <Meter
+        label="Memory"
+        value={host.mem_used_mb}
+        max={host.mem_total_mb}
+        text={`${mb(host.mem_used_mb)} / ${mb(host.mem_total_mb)}`}
+      />
+      <Meter
+        label="Disk"
+        value={host.disk_used_mb}
+        max={host.disk_total_mb}
+        text={`${mb(host.disk_used_mb)} / ${mb(host.disk_total_mb)}`}
+      />
+      {host.swap_total_mb > 0 && (
+        <Meter
+          label="Swap"
+          value={host.swap_used_mb}
+          max={host.swap_total_mb}
+          text={`${mb(host.swap_used_mb)} / ${mb(host.swap_total_mb)}`}
+        />
       )}
-    </section>
+      <dl className="railfacts">
+        <dt>Load</dt>
+        <dd>{host.load1.toFixed(2)}{host.cores > 0 && ` / ${host.cores}`}</dd>
+        <dt>Uptime</dt>
+        <dd>{uptime(host.uptime_seconds)}</dd>
+      </dl>
+    </Panel>
   );
 }
 
-function AccountPanel({ me, usage }) {
+function TotalsPanel({ totals }) {
+  if (!totals) return null;
+  return (
+    <Panel title="Hosted here">
+      <dl className="railfacts">
+        <dt>Accounts</dt>
+        <dd>{totals.accounts}</dd>
+        {totals.resellers > 0 && (
+          <>
+            <dt>Resellers</dt>
+            <dd>{totals.resellers}</dd>
+          </>
+        )}
+        <dt>Websites</dt>
+        <dd>{totals.sites}</dd>
+        <dt>Databases</dt>
+        <dd>{totals.databases}</dd>
+      </dl>
+    </Panel>
+  );
+}
+
+function AllowancePanel({ allowance }) {
+  if (!allowance) return null;
+  const { used, limits } = allowance;
+  return (
+    <Panel title="Handed out">
+      <dl className="railfacts">
+        <dt>Accounts</dt>
+        <dd>{count(used.accounts, limits.max_accounts)}</dd>
+        <dt>Websites</dt>
+        <dd>{count(used.sites, limits.max_sites)}</dd>
+        <dt>Databases</dt>
+        <dd>{count(used.databases, limits.max_databases)}</dd>
+        <dt>Disk</dt>
+        <dd>
+          {limits.disk_quota_mb > 0
+            ? `${mb(used.disk_quota_mb)} / ${mb(limits.disk_quota_mb)}`
+            : mb(used.disk_quota_mb)}
+        </dd>
+      </dl>
+    </Panel>
+  );
+}
+
+function AccountPanel({ usage }) {
+  if (!usage) return <Panel title="Your account"><p className="railnote">…</p></Panel>;
+  return (
+    <Panel title={usage.plan_name || 'Your account'}>
+      <Meter
+        label="Disk"
+        value={usage.disk_bytes}
+        max={usage.disk_quota_mb * 1024 * 1024}
+        text={usage.disk_quota_mb > 0
+          ? `${fmtBytes(usage.disk_bytes)} / ${mb(usage.disk_quota_mb)}`
+          : fmtBytes(usage.disk_bytes)}
+      />
+      <dl className="railfacts">
+        <dt>Websites</dt>
+        <dd>{count(usage.sites, usage.max_sites)}</dd>
+        <dt>Databases</dt>
+        <dd>{count(usage.databases, usage.max_databases)}</dd>
+      </dl>
+      {usage.disk_quota_mb > 0 && !usage.quota_enforced && (
+        <p className="railnote">Disk is measured, not enforced.</p>
+      )}
+    </Panel>
+  );
+}
+
+function Panel({ title, children }) {
   return (
     <section>
-      <h2>{me.username}</h2>
-      {!usage ? (
-        <p className="railnote">…</p>
-      ) : (
-        <>
-          <Meter
-            label="Disk"
-            value={usage.disk_bytes}
-            max={usage.disk_quota_mb * 1024 * 1024}
-            text={usage.disk_quota_mb > 0
-              ? `${fmtBytes(usage.disk_bytes)} / ${mb(usage.disk_quota_mb)}`
-              : fmtBytes(usage.disk_bytes)}
-          />
-          <dl className="railfacts">
-            <dt>Websites</dt>
-            <dd>{count(usage.sites, usage.max_sites)}</dd>
-            <dt>Databases</dt>
-            <dd>{count(usage.databases, usage.max_databases)}</dd>
-            {usage.plan_name && (
-              <>
-                <dt>Package</dt>
-                <dd>{usage.plan_name}</dd>
-              </>
-            )}
-          </dl>
-          {usage.disk_quota_mb > 0 && !usage.quota_enforced && (
-            <p className="railnote">Disk is measured, not enforced.</p>
-          )}
-        </>
-      )}
+      <h2>{title}</h2>
+      {children}
     </section>
   );
 }
