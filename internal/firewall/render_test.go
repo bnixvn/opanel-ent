@@ -18,12 +18,13 @@ func rule(kind, addr string, port int) *db.FirewallRule {
 // operator needs to get back in are open. Everything else in the firewall
 // can be wrong and be fixed; this one cannot.
 func TestRenderAlwaysKeepsTheWayIn(t *testing.T) {
-	out, err := Render(Ruleset{SSHPorts: []int{22, 2201}, PanelPort: 2222})
+	out, err := Render(Ruleset{SSHPorts: []int{22, 2201}, PanelPort: 2222, WebPorts: DefaultWebPorts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"tcp dport 22 accept", "tcp dport 2201 accept", "tcp dport 2222 accept",
+		"tcp dport 80 accept", "tcp dport 443 accept",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the rendered ruleset is missing %q", want)
@@ -165,5 +166,23 @@ func TestRenderSkipsRubbishInAFeed(t *testing.T) {
 	}
 	if !strings.Contains(out, "198.51.100.1") || !strings.Contains(out, "203.0.113.0/24") {
 		t.Error("the good addresses were lost with the bad one")
+	}
+}
+
+// The failure this guards against is quiet: with 80 and 443 closed, the
+// panel still answers on its own port and looks perfectly healthy while
+// every customer's website is unreachable, and certificate renewal starts
+// failing weeks before anyone notices the certificates are gone.
+func TestWebPortsAreAlwaysOpen(t *testing.T) {
+	// No rules at all -- the state a host is in the moment the firewall is
+	// switched on for the first time.
+	out, err := Render(Ruleset{SSHPorts: []int{22}, PanelPort: 2222, WebPorts: DefaultWebPorts})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"tcp dport 80 accept", "tcp dport 443 accept"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("a firewall with no rules does not serve the web: %q missing from\n%s", want, out)
+		}
 	}
 }

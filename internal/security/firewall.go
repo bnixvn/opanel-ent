@@ -20,10 +20,17 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/firewall"
 )
 
-// ProtectedPorts are never closed by a rule. SSH and the panel's own port
-// are how an operator gets back in; a firewall that can shut them is a
-// firewall that will eventually shut them.
-var ProtectedPorts = map[int]string{22: "SSH", 2222: "the panel"}
+// ProtectedPorts are never closed by a rule.
+//
+// SSH and the panel's own port are how an operator gets back in. 80 and 443
+// are what the machine exists to serve, and closing them takes every
+// customer's website down while the panel carries on answering on its own
+// port and looking healthy -- the worst kind of outage to diagnose. Port 80
+// is also how certificate renewal is validated, so closing it breaks TLS
+// weeks later rather than immediately.
+var ProtectedPorts = map[int]string{
+	22: "SSH", 2222: "the panel", 80: "websites", 443: "websites",
+}
 
 // Firewall manages the packet filter.
 type Firewall struct {
@@ -73,6 +80,11 @@ func (s *Firewall) Status(ctx context.Context) (map[string]any, error) {
 			"port": s.panelPort, "protocol": "tcp", "reason": "the panel",
 		})
 	}
+	for _, p := range firewall.DefaultWebPorts {
+		protected = append(protected, map[string]any{
+			"port": p, "protocol": "tcp", "reason": "websites",
+		})
+	}
 
 	return map[string]any{
 		"active":          st.Active,
@@ -101,6 +113,7 @@ func (s *Firewall) Apply(ctx context.Context, confirmed bool) error {
 	script, err := firewall.Render(firewall.Ruleset{
 		Rules: rules, Blocklist: blocked,
 		SSHPorts: s.sshPorts, PanelPort: s.panelPort,
+		WebPorts: firewall.DefaultWebPorts,
 	})
 	if err != nil {
 		return err
@@ -121,6 +134,15 @@ func (s *Firewall) AddRule(ctx context.Context, r *db.FirewallRule) (*db.Firewal
 	if err := validate(r); err != nil {
 		return nil, err
 	}
+	// A rule for a port the renderer always opens would sit in the list
+	// looking meaningful and be impossible to distinguish from the reason
+	// the port is actually open. Worse, deleting it later would look like it
+	// closed the port when nothing changed.
+	if r.Kind == db.FirewallPort && r.Address == "" && r.PortTo == 0 {
+		if name, always := ProtectedPorts[r.PortFrom]; always {
+			return nil, fmt.Errorf("port %d is already open for %s", r.PortFrom, name)
+		}
+	}
 	created, err := s.db.CreateFirewallRule(ctx, r)
 	if err != nil {
 		return nil, err
@@ -135,16 +157,16 @@ func (s *Firewall) AddRule(ctx context.Context, r *db.FirewallRule) (*db.Firewal
 }
 
 // DeleteRule removes a rule and reapplies.
+//
+// There is no protected-port check here, and there must not be. A protected
+// port is opened by the renderer on every apply, not by a row, so deleting a
+// row that also opens it closes nothing -- while refusing the delete would
+// leave a rule that can never be removed and a list nobody can tidy. What
+// protects those ports is that no rule is needed to open them; AddRule
+// refuses to create one for exactly that reason.
 func (s *Firewall) DeleteRule(ctx context.Context, id int64) error {
-	rule, err := s.db.FirewallRuleByID(ctx, id)
-	if err != nil {
+	if _, err := s.db.FirewallRuleByID(ctx, id); err != nil {
 		return err
-	}
-	if rule.Kind == db.FirewallPort {
-		if name, protected := ProtectedPorts[rule.PortFrom]; protected {
-			return fmt.Errorf("port %d is %s and cannot be closed from here",
-				rule.PortFrom, name)
-		}
 	}
 	if err := s.db.DeleteFirewallRule(ctx, id); err != nil {
 		return err

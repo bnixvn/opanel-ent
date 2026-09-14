@@ -36,7 +36,17 @@ type Ruleset struct {
 	// operator out of the machine.
 	SSHPorts  []int
 	PanelPort int
+	// WebPorts are always open for the same reason, one level up: this is a
+	// hosting panel, and a firewall that can close 80 and 443 is a firewall
+	// that will one day take every customer's website offline -- silently,
+	// because the panel answers on its own port and still looks healthy.
+	// Certificate renewal goes with them: HTTP-01 validation is fetched over
+	// port 80 from outside, so closing it breaks TLS weeks later.
+	WebPorts []int
 }
+
+// DefaultWebPorts is what a hosting host has to answer on.
+var DefaultWebPorts = []int{80, 443}
 
 // Render produces an nft script.
 func Render(rs Ruleset) (string, error) {
@@ -82,6 +92,9 @@ func Render(rs Ruleset) (string, error) {
 	}
 	if rs.PanelPort > 0 {
 		fmt.Fprintf(&b, "        tcp dport %d accept comment \"panel\"\n", rs.PanelPort)
+	}
+	for _, p := range rs.WebPorts {
+		fmt.Fprintf(&b, "        tcp dport %d accept comment \"web\"\n", p)
 	}
 
 	b.WriteString("\n")
