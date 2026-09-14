@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/db"
@@ -144,7 +146,45 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if st, err := s.plans.QuotaStatus(r.Context()); err == nil {
 		out["quota"] = st
 	}
+	out["terminal"] = map[string]any{
+		"commands":           stored[settingTerminalCommands],
+		"default_commands":   strings.Join(agent.ShellCommands, " "),
+		"staff_unrestricted": stored[settingTerminalFreeStaff] == "1",
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleTerminalSettingsSet widens, narrows or drops the terminal's command
+// list.
+//
+// Allowed because the list never was a security boundary: php and node are
+// on it and run whatever they are given, so an operator turning it off is
+// giving away nothing that was being held. What it changes is how easy it is
+// to reach for something by accident, which is the operator's call to make
+// about their own server.
+func (s *Server) handleTerminalSettingsSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Commands          string `json:"commands"`
+		StaffUnrestricted bool   `json:"staff_unrestricted"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.db.SetSetting(r.Context(), settingTerminalCommands, strings.TrimSpace(req.Commands)); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	value := ""
+	if req.StaffUnrestricted {
+		value = "1"
+	}
+	if err := s.db.SetSetting(r.Context(), settingTerminalFreeStaff, value); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	s.audit(r, "settings.terminal", "", true,
+		fmt.Sprintf("staff_unrestricted=%v", req.StaffUnrestricted))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handleHostnameAdd records a name the panel will answer on.

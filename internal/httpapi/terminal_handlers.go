@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coder/websocket"
 
@@ -17,6 +19,35 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/termproto"
 )
+
+// Settings an administrator can change to widen or drop the command list.
+//
+// Widening it gives nothing away, which is why it is allowed. The list is a
+// guard rail against mistakes -- php and node are on it and run whatever
+// they are given -- so the thing it is not is the reason an operator may
+// turn it off. What cannot be changed from here is who the shell runs as.
+const (
+	settingTerminalCommands  = "terminal.commands"
+	settingTerminalFreeStaff = "terminal.staff_unrestricted"
+)
+
+// terminalPolicy reads the effective command list for one session.
+func (s *Server) terminalPolicy(r *http.Request, u *db.User) (commands []string, unrestricted bool) {
+	if free, err := s.db.Setting(r.Context(), settingTerminalFreeStaff, ""); err == nil && free == "1" {
+		if auth.Role(u.Role).AtLeast(auth.RoleReseller) {
+			return nil, true
+		}
+	}
+	raw, err := s.db.Setting(r.Context(), settingTerminalCommands, "")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return agent.ShellCommands, false
+	}
+	// Commas, semicolons or any whitespace: an operator editing a list of
+	// forty names in a text box separates them however they feel like.
+	return strings.FieldsFunc(raw, func(c rune) bool {
+		return c == ',' || c == ';' || unicode.IsSpace(c)
+	}), false
+}
 
 // handleTerminalStatus says whether the signed-in account can have a shell,
 // so the page can show a reason rather than a button that fails.
@@ -31,12 +62,14 @@ func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	commands, unrestricted := s.terminalPolicy(r, u)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"available": true,
 		"username":  u.Username,
 		// What the session may run, so the page can say so before somebody
 		// types something and is told no.
-		"commands": agent.ShellCommands,
+		"commands":     commands,
+		"unrestricted": unrestricted,
 	})
 }
 
@@ -89,7 +122,12 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.Close() }()
 
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := json.NewEncoder(conn).Encode(termproto.Hello{User: target, Cols: cols, Rows: rows}); err != nil {
+	commands, unrestricted := s.terminalPolicy(r, u)
+	hello := termproto.Hello{
+		User: target, Cols: cols, Rows: rows,
+		Commands: commands, Unrestricted: unrestricted,
+	}
+	if err := json.NewEncoder(conn).Encode(hello); err != nil {
 		writeError(w, http.StatusBadGateway, "agent_error", "the agent closed the connection")
 		return
 	}

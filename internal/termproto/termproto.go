@@ -22,6 +22,20 @@ type Hello struct {
 	User string `json:"user"`
 	Cols uint16 `json:"cols"`
 	Rows uint16 `json:"rows"`
+
+	// Commands is what the session's PATH should hold. Empty means the
+	// agent's own default list.
+	//
+	// The panel chooses this, and that is fine here in a way it would not be
+	// for User: the command list is a guard rail against mistakes, not a
+	// boundary -- php and node are on it and run whatever they are given --
+	// so there is nothing for the agent to defend by overruling it. Who the
+	// shell runs as is the decision that matters, and the agent keeps that
+	// one.
+	Commands []string `json:"commands,omitempty"`
+
+	// Unrestricted asks for the machine's own PATH and no startup file.
+	Unrestricted bool `json:"unrestricted,omitempty"`
 }
 
 // Ready is the agent's reply to Hello, also one JSON line.

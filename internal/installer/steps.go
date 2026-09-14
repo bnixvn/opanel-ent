@@ -42,8 +42,15 @@ const (
 )
 
 // basePackages are needed before anything else works.
+//
+// The last four are for the terminal rather than the panel: unzip and zip
+// because composer unpacks with one and everybody expects the other, and
+// node with npm because a Laravel project builds its assets with them. A
+// terminal that offers composer and then cannot run it is worse than one
+// that does not offer it.
 var basePackages = []string{
 	"nftables", "valkey", "zstd", "tar", "curl", "git", "quota", "policycoreutils-python-utils",
+	"unzip", "zip", "nodejs", "npm",
 }
 
 func allSteps() []Step {
@@ -62,6 +69,7 @@ func allSteps() []Step {
 		{Name: "Install systemd units", Apply: stepUnits},
 		{Name: "Enable disk quota", Check: checkProjectQuota, Apply: stepProjectQuota},
 		{Name: "Install WP-CLI", Check: checkWPCLI, Apply: stepWPCLI},
+		{Name: "Install Composer", Check: checkComposer, Apply: stepComposer},
 		{Name: "Configure SFTP", Check: checkSFTP, Apply: stepSFTP},
 		{Name: "Configure firewall", Check: checkFirewall, Apply: stepFirewall},
 		{Name: "Enable valkey", Apply: stepValkey},
@@ -251,7 +259,26 @@ func stepBasePackages(ctx context.Context, _ *Options) error {
 			return err
 		}
 	}
-	return pkgmgr.Install(ctx, basePackages...)
+	if err := pkgmgr.Install(ctx, basePackages...); err != nil {
+		return err
+	}
+
+	// AlmaLinux 10 ships a libnode built against a newer c-ares than the base
+	// image carries, and dnf does not notice: the old one satisfies the
+	// versionless dependency, so node installs cleanly and then dies with
+	// "undefined symbol: ares_query_dnsrec" the first time anybody runs it.
+	// Nothing here depends on node, so this is not fatal -- but a terminal
+	// that offers node and cannot start it is worse than one that does not.
+	if _, err := run.Cmd(ctx, []string{"node", "-v"}); err != nil {
+		if uerr := pkgmgr.Install(ctx, "c-ares"); uerr != nil {
+			return nil
+		}
+		if _, err := run.Cmd(ctx, []string{"dnf", "upgrade", "-y", "c-ares"},
+			run.Timeout(5*time.Minute)); err != nil {
+			return nil
+		}
+	}
+	return nil
 }
 
 func stepLiteSpeedRepo(ctx context.Context, _ *Options) error {

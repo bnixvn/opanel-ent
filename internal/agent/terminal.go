@@ -228,6 +228,21 @@ func (s *TerminalServer) resolve(username string) (*linuxuser.Account, error) {
 
 func (s *TerminalServer) run(conn net.Conn, br *bufio.Reader, acct *linuxuser.Account, hello termproto.Hello) {
 	shell := firstShell()
+
+	policy, err := BuildSessionPolicy(hello.Commands, hello.Unrestricted)
+	if err != nil {
+		s.log.Error("agent: cannot prepare a terminal session", "err", err)
+		_ = termproto.WriteFrame(conn, termproto.FrameExit,
+			[]byte("could not prepare the session: "+err.Error()))
+		return
+	}
+	defer policy.Cleanup()
+
+	args := []string{filepath.Base(shell), "-i"}
+	if policy.RC != "" {
+		args = []string{filepath.Base(shell), "--rcfile", policy.RC, "-i"}
+	}
+
 	term, err := pty.Start(pty.Options{
 		Path: shell,
 		// Interactive with our own startup file rather than a login shell.
@@ -235,14 +250,14 @@ func (s *TerminalServer) run(conn net.Conn, br *bufio.Reader, acct *linuxuser.Ac
 		// ~/.bash_profile, and the account owns that file -- so the last
 		// word on PATH would belong to the person the PATH is there to
 		// bound. --rcfile also replaces ~/.bashrc, for the same reason.
-		Args: []string{filepath.Base(shell), "--rcfile", ShellRC(), "-i"},
+		Args: args,
 		Dir:  acct.Home,
 		Env: []string{
 			"HOME=" + acct.Home,
 			"USER=" + acct.Username,
 			"LOGNAME=" + acct.Username,
 			"SHELL=" + shell,
-			"PATH=" + ShellBinDir(),
+			"PATH=" + policy.PATH,
 			"TERM=xterm-256color",
 			"LANG=C.UTF-8",
 		},
@@ -260,7 +275,8 @@ func (s *TerminalServer) run(conn net.Conn, br *bufio.Reader, acct *linuxuser.Ac
 		return
 	}
 	defer term.Close()
-	s.log.Info("agent: terminal opened", "user", acct.Username, "shell", shell)
+	s.log.Info("agent: terminal opened", "user", acct.Username, "shell", shell,
+		"restricted", policy.RC != "", "commands", len(policy.Linked))
 
 	var (
 		mu   sync.Mutex

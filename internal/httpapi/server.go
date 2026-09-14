@@ -323,6 +323,7 @@ func (s *Server) routes() http.Handler {
 				ar.Delete("/settings/hostnames", s.handleHostnameDelete)
 				ar.Put("/settings/ipv6", s.handleIPv6Set)
 				ar.Put("/settings/passkeys", s.handlePasskeyEnable)
+				ar.Put("/settings/terminal", s.handleTerminalSettingsSet)
 				ar.Put("/users/{id}/reseller-limits", s.handleResellerLimitsSet)
 				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Hint, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
 // PasskeySwitch is the administrator's activation button.
 //
@@ -99,6 +99,8 @@ export default function Settings() {
       <Message value={msg.message} onClear={msg.clear} />
 
       <Branding branding={data.branding} msg={msg} onSaved={load} />
+
+      <TerminalSettings terminal={data.terminal} msg={msg} onSaved={load} />
 
       <Card title="This server">
         <dl className="kv">
@@ -322,6 +324,82 @@ function Branding({ branding, msg, onSaved }) {
           PNG, JPEG, WebP or GIF, under 256 KB.
         </span>
       </div>
+    </Card>
+  );
+}
+
+// TerminalSettings widens, narrows or drops the terminal's command list.
+//
+// Offered at all because the list is not a security boundary and never was:
+// php and node are on it and run whatever they are given, so an operator
+// turning it off gives away nothing that was being held. It is a guard rail
+// against reaching for the wrong thing, and how tight that rail should be is
+// the operator's call about their own server.
+function TerminalSettings({ terminal, msg, onSaved }) {
+  const [commands, setCommands] = useState(
+    (terminal && terminal.commands) || (terminal && terminal.default_commands) || '',
+  );
+  const [free, setFree] = useState(Boolean(terminal && terminal.staff_unrestricted));
+  const [busy, setBusy] = useState(false);
+  if (!terminal) return null;
+
+  return (
+    <Card title="Terminal">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try {
+            await api.put('/settings/terminal', {
+              commands: commands.trim(),
+              staff_unrestricted: free,
+            });
+            msg.ok('Saved. It applies to terminals opened from now on.');
+            onSaved();
+          } catch (err) {
+            msg.fail(err);
+          }
+          setBusy(false);
+        }}
+      >
+        <div className="field">
+          <label htmlFor="termCmds">
+            Commands
+            <Hint>
+              Separated by spaces, commas or newlines. Anything else answers
+              with a message naming what is available. Leave it empty for the
+              built-in list.
+            </Hint>
+          </label>
+          <textarea
+            id="termCmds"
+            rows={4}
+            value={commands}
+            placeholder={terminal.default_commands}
+            onChange={(e) => setCommands(e.target.value)}
+            style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.8rem' }}
+          />
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={free} onChange={(e) => setFree(e.target.checked)} />
+          Administrators and resellers get the whole system
+          <Hint>
+            Their sessions use the machine&apos;s own PATH and no list. They
+            still run as their own unprivileged account, never as root.
+          </Hint>
+        </label>
+        <p style={{ marginBottom: 0 }}>
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>{' '}
+          <button
+            type="button"
+            onClick={() => { setCommands(terminal.default_commands); setFree(false); }}
+          >
+            Back to the built-in list
+          </button>
+        </p>
+      </form>
     </Card>
   );
 }

@@ -134,14 +134,15 @@ export function SFTPCard() {
       </p>
 
       <h3 className="subhead">
-        Extra credentials
+        Extra logins
         <Hint>
-          As many as you need, up to {data.limit || 20}. Each is a separate
-          login with its own password, withdrawn on its own without touching
-          the others. Every one of them has the account&apos;s own
+          A username and a password of its own -- a second way in, not a
+          second password for the one above. As many as you need, up to
+          {` ${data.limit || 20}`}. Each has the account&apos;s own
           permissions: the same files, read and write, confined to this home
-          directory and nothing outside it. None of them can open a shell,
-          and none can be limited to a single website.
+          directory and nothing outside it. Removing one leaves the others
+          alone. None of them can open a shell, and none can be limited to a
+          single website.
         </Hint>
       </h3>
 
@@ -260,7 +261,7 @@ export function SFTPCard() {
           </div>
           <div>
             <button type="submit" className="primary" disabled={busy}>
-              {busy ? 'Creating…' : 'Add a credential'}
+              {busy ? 'Creating…' : 'Add a login'}
             </button>
           </div>
         </form>
