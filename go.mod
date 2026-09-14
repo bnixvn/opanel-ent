@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/pquerna/otp v1.5.0
 	github.com/pressly/goose/v3 v3.26.0
 	golang.org/x/crypto v0.50.0
@@ -18,7 +19,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
-	github.com/go-sql-driver/mysql v1.10.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect

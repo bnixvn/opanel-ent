@@ -7,6 +7,8 @@ import Sites from './pages/Sites.jsx';
 import Databases from './pages/Databases.jsx';
 import Files from './pages/Files.jsx';
 import Backups from './pages/Backups.jsx';
+import Ssl from './pages/Ssl.jsx';
+import Logs from './pages/Logs.jsx';
 import Users from './pages/Users.jsx';
 import Packages from './pages/Packages.jsx';
 import Php from './pages/Php.jsx';
@@ -23,6 +25,8 @@ const MENU = [
     { to: '/databases', label: 'Databases' },
     { to: '/files', label: 'File manager' },
     { to: '/backups', label: 'Backups' },
+    { to: '/ssl', label: 'SSL' },
+    { to: '/logs', label: 'Logs' },
   ] },
   { group: 'Server', roles: ['admin', 'reseller'], items: [
     { to: '/users', label: 'Users', roles: ['admin', 'reseller'] },
@@ -157,6 +161,8 @@ export default function App() {
             <Route path="/databases" element={<Databases me={me} />} />
             <Route path="/files" element={<Files me={me} />} />
             <Route path="/backups" element={<Backups me={me} />} />
+            <Route path="/ssl" element={<Ssl me={me} />} />
+            <Route path="/logs" element={<Logs />} />
             <Route path="/account" element={<Account me={me} />} />
             {(role === 'admin' || role === 'reseller') && (
               <>

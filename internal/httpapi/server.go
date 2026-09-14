@@ -100,6 +100,10 @@ func (s *Server) routes() http.Handler {
 			pr.Delete("/sites/{id}", s.handleSiteDelete)
 			pr.Get("/sites/{id}/wordpress", s.handleWordPressStatus)
 			pr.Post("/sites/{id}/wordpress", s.handleWordPressInstall)
+			pr.Get("/sites/{id}/certificate/reusable", s.handleCertReusable)
+			pr.Post("/sites/{id}/certificate/wildcard", s.handleSiteCertificateWildcard)
+			pr.Post("/sites/{id}/certificate/reuse", s.handleSiteCertificateReuse)
+			pr.Post("/sites/{id}/certificate/manual", s.handleSiteCertificateManual)
 			pr.Post("/sites/{id}/certificate", s.handleSiteCertificate)
 			pr.Delete("/sites/{id}/certificate", s.handleSiteCertificateDelete)
 
@@ -130,6 +134,11 @@ func (s *Server) routes() http.Handler {
 			// reads anyone's with ?user=<id>.
 			pr.Get("/reseller", s.handleResellerSummary)
 			pr.Get("/quota/status", s.handleQuotaStatus)
+
+			// Logs. Scoped to a website the caller owns, because a log holds
+			// visitors' addresses and the paths they asked for.
+			pr.Get("/logs", s.handleLogTail)
+			pr.Get("/logs/download", s.handleLogDownload)
 			pr.Get("/notifications", s.handleNotificationGet)
 			pr.Put("/notifications", s.handleNotificationSet)
 
@@ -187,6 +196,8 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
+				ar.Get("/certificates", s.handleCertList)
+				ar.Delete("/certificates", s.handleCertDelete)
 				ar.Get("/settings", s.handleSettings)
 				ar.Put("/settings/branding", s.handleBrandingSet)
 				ar.Post("/settings/hostnames", s.handleHostnameAdd)

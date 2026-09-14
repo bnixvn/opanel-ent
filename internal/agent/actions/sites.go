@@ -294,6 +294,18 @@ func registerSites(r *agent.Registry, deps Deps) {
 		if err != nil {
 			return struct{}{}, &agent.PayloadError{Err: err}
 		}
+		// Sites created before the log directory mode was corrected still
+		// have one the webserver cannot enter. Fixing it here means the
+		// existing estate is repaired by the next configuration change
+		// rather than needing every site touched by hand.
+		for _, site := range sites {
+			logs := path.Join(site.VhostRoot, "logs")
+			if info, err := os.Stat(logs); err == nil && info.Mode().Perm() == 0o750 {
+				if err := os.Chmod(logs, 0o751); err != nil {
+					return struct{}{}, fmt.Errorf("repair %s: %w", logs, err)
+				}
+			}
+		}
 		rendered, err := deps.Webserver.Render(in.Config, sites)
 		if err != nil {
 			return struct{}{}, err
@@ -407,14 +419,21 @@ func provisionSite(ctx context.Context, in SiteProvisionRequest) error {
 	//                             (nobody), not as the site owner, so it must
 	//                             be able to traverse in. It has no business
 	//                             listing the directory, hence execute only.
-	//   0750 on logs           -- only the owner reads their own logs.
+	//   0751 on logs           -- 0750 was wrong and cost every site its
+	//                             access log. The webserver opens the log as
+	//                             its own account, so it has to traverse in;
+	//                             with 0750 it could not, wrote nothing, and
+	//                             reported no error. Execute-only for other
+	//                             accounts still keeps the directory
+	//                             unlistable, and the log files themselves
+	//                             decide who may read them.
 	//   0755 on the doc root   -- this is what the world is meant to reach.
 	dirs := []struct {
 		path string
 		mode os.FileMode
 	}{
 		{in.VhostRoot, 0o711},
-		{path.Join(in.VhostRoot, "logs"), 0o750},
+		{path.Join(in.VhostRoot, "logs"), 0o751},
 		{in.DocumentRoot, 0o755},
 	}
 	for _, d := range dirs {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"path"
 	"slices"
 	"strings"
@@ -345,6 +346,20 @@ func (s *Service) IssueCertificate(ctx context.Context, req CertificateRequest) 
 	if req.IncludeAliases {
 		domains = append(domains, site.Aliases...)
 	}
+	// Almost every customer wants www on the certificate, and almost none
+	// think to ask. It is added when DNS already sends www to the same place
+	// as the bare name, and left out otherwise -- an unresolvable name on the
+	// order fails the whole thing, and losing the certificate the customer
+	// actually asked for is much worse than not having www on it.
+	if www := wwwSibling(site.Domain); www != "" && !slices.Contains(domains, www) {
+		if sameDestination(ctx, site.Domain, www) {
+			domains = append(domains, www)
+			s.log.Info("sites: including www on the certificate", "domain", site.Domain)
+		} else {
+			s.log.Info("sites: leaving www off the certificate, DNS does not point here",
+				"domain", site.Domain)
+		}
+	}
 
 	cert, err := agentclient.Call[acme.Certificate](ctx, s.agent, "cert.issue", 1,
 		actions.CertIssueRequest{Domains: domains, Email: req.Email, Staging: req.Staging})
@@ -410,6 +425,76 @@ func (s *Service) RenewDueCertificates(ctx context.Context, email string) (renew
 		renewed++
 	}
 	return renewed, errs
+}
+
+// wwwSibling returns the www form of a hostname, or "" when there is not one
+// worth asking about: a name that is already www, or one deep enough that
+// www in front of it would be unusual.
+func wwwSibling(domain string) string {
+	if strings.HasPrefix(domain, "www.") {
+		return ""
+	}
+	if strings.Count(domain, ".") > 2 {
+		return ""
+	}
+	return "www." + domain
+}
+
+// sameDestination reports whether two names resolve to at least one address
+// in common.
+//
+// Comparing the two names against each other rather than against the
+// server's own addresses is deliberate: behind a CDN or a load balancer the
+// site does not resolve to this machine at all, and the question that
+// matters is whether www lands wherever the bare name lands.
+func sameDestination(ctx context.Context, a, b string) bool {
+	lookup := func(host string) map[string]bool {
+		ips, err := net.DefaultResolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil
+		}
+		out := make(map[string]bool, len(ips))
+		for _, ip := range ips {
+			out[ip] = true
+		}
+		return out
+	}
+	first := lookup(a)
+	if len(first) == 0 {
+		return false
+	}
+	for ip := range lookup(b) {
+		if first[ip] {
+			return true
+		}
+	}
+	return false
+}
+
+// AttachCertificate points a site at a certificate that already exists on
+// disk, whoever obtained it.
+//
+// Shared by the wildcard, reuse and manual paths: all three end with "this
+// site now serves these two files", and having one place that writes the
+// row and re-renders the webserver means the three cannot drift.
+func (s *Service) AttachCertificate(ctx context.Context, siteID int64,
+	certFile, keyFile string, notAfter time.Time, forceHTTPS bool) (*db.Site, error) {
+	site, err := s.db.SiteByID(ctx, siteID)
+	if err != nil {
+		return nil, err
+	}
+	site.CertFile = certFile
+	site.KeyFile = keyFile
+	site.CertExpires = notAfter
+	site.SSLEnabled = true
+	site.ForceHTTPS = forceHTTPS
+	if err := s.db.UpdateSite(ctx, site); err != nil {
+		return nil, err
+	}
+	if err := s.SyncWebserver(ctx); err != nil {
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	return s.db.SiteByID(ctx, siteID)
 }
 
 // SyncWebserver regenerates the whole webserver configuration from the
