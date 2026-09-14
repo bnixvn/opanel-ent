@@ -139,15 +139,27 @@ func cmdInstall(ctx context.Context, args []string) error {
 		fmt.Printf("%d panel user(s) already exist; no administrator was created.\n", n)
 	}
 
+	// A host that already has a certificate is usually one being upgraded,
+	// and telling that operator to go and fix a self-signed certificate they
+	// replaced months ago sends them looking for a problem that is not there.
+	host, certFile := "<server-ip>", ""
+	if names, err := database.ListPanelHostnames(ctx); err == nil && len(names) > 0 {
+		host, certFile = names[0].Hostname, names[0].CertFile
+	}
+
 	fmt.Println()
-	fmt.Printf("Panel:  https://<server-ip>:%d\n", opts.PanelPort)
+	fmt.Printf("Panel:  https://%s:%d\n", host, opts.PanelPort)
 	fmt.Printf("Config: %s/opanel.env\n", installer.ConfigDir)
 	fmt.Printf("Data:   %s\n", cfg.DataDir)
 	fmt.Println()
-	fmt.Println("The panel serves HTTPS with a self-signed certificate, so the first visit")
-	fmt.Println("shows a browser warning. Replace it with a real one once the hostname")
-	fmt.Println("resolves to this server:")
-	fmt.Println("  opanelctl cert issue --panel <hostname> <email>")
+	if certFile != "" {
+		fmt.Printf("TLS:    %s\n", certFile)
+	} else {
+		fmt.Println("The panel serves HTTPS with a self-signed certificate, so the first visit")
+		fmt.Println("shows a browser warning. Replace it with a real one once the hostname")
+		fmt.Println("resolves to this server:")
+		fmt.Println("  opanelctl cert issue --panel <hostname> <email>")
+	}
 	return nil
 }
 

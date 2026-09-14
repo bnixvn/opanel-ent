@@ -32,7 +32,26 @@ that runs arbitrary input as root, and the list of actions is compiled in.
 
 ## Install
 
-Take the binaries from a release, or build them (below), then:
+One file, on a freshly installed AlmaLinux 10, as root:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/bnixvn/opanel-ent/main/install.sh
+bash install.sh
+```
+
+That is the whole thing. `install.sh` installs a Go toolchain if the server
+has none, clones this repository to `/usr/local/src/opanel-ent`, builds the
+three binaries and hands over to `opanelctl install`. Flags it does not
+recognise go straight through, so `bash install.sh --port 8443 --php 8.4,8.3`
+does what it looks like it does.
+
+Its own two flags: `--ref` to build a branch, tag or commit other than
+`main`, and `--src` to keep the source somewhere else. Run it again to
+upgrade — it fetches, rebuilds and re-runs the installer, and every step
+checks whether it is already done.
+
+If you already have the binaries — from a release, from `make build`, or from
+a clone you did yourself — skip all of that:
 
 ```bash
 ./opanelctl install
@@ -40,11 +59,12 @@ Take the binaries from a release, or build them (below), then:
 
 Nothing else needs installing first: the installer brings its own
 dependencies. Building from source is the one path that needs a toolchain,
-and a freshly installed AlmaLinux 10 has none of it.
+and a freshly installed AlmaLinux 10 has none of it — which is the only
+reason `install.sh` exists.
 
-That is the whole installation. It is idempotent: every step checks whether
-it is already done, so running it again after a failure continues rather than
-starts over. It will:
+Either way it is the same installer underneath, and it is idempotent: every
+step checks whether it is already done, so running it again after a failure
+continues rather than starts over. It will:
 
 - install OpenLiteSpeed, LSPHP, MariaDB, valkey, nftables and the tools a
   terminal session needs (git, composer, node, unzip)
@@ -66,12 +86,14 @@ Then open `https://<server>:2222` and sign in with the printed password.
 ### A certificate for the panel
 
 ```bash
-./opanelctl cert issue panel.example.com you@example.com --panel
+opanelctl cert issue panel.example.com you@example.com --panel
 ```
 
-`--panel` points the panel's own TLS at the certificate it just obtained.
-Until you do this the panel serves a self-signed certificate, which browsers
-accept grudgingly and passkeys refuse outright.
+`--panel` points the panel's own TLS at the certificate it just obtained, and
+records the name as the one the panel answers to. Until you do this the panel
+serves a self-signed certificate, which browsers accept grudgingly and
+passkeys refuse outright. The email is optional; without one Let's Encrypt
+cannot warn you before the certificate expires.
 
 ## Build from source
 
@@ -152,6 +174,7 @@ panel asking nicely.
 ## Repository layout
 
 ```
+install.sh         the one-file installer: toolchain, source, build, install
 cmd/               the three binaries
 internal/
   agent/           the root side: action registry, terminal sessions
@@ -162,6 +185,7 @@ internal/
   webserver/       OpenLiteSpeed config rendering
   platform/        thin wrappers over the host: users, packages, quota, pty
 web/               the interface's source; built output is committed
+crates/            the Rust agent, mid-port and not yet serving anything
 modules/servers/   WHMCS provisioning module
 docs/              what is not built yet, and notes on the platform
 ```
