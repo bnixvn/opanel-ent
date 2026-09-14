@@ -15,7 +15,7 @@ pub const SOCKET_PATH: &str = "/run/opanel/agent.sock";
 pub const MAX_MESSAGE_BYTES: usize = 4 << 20;
 
 /// One call.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Request {
     /// Echoed back so a caller can correlate logs. No protocol meaning.
     #[serde(default)]

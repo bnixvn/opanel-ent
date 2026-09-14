@@ -39,6 +39,42 @@ impl From<std::io::Error> for Failure {
     }
 }
 
+impl From<crate::platform::run::Error> for Failure {
+    fn from(e: crate::platform::run::Error) -> Self {
+        Failure::internal(e.to_string())
+    }
+}
+
+/// Lets an input check itself, after decoding and before the handler runs.
+///
+/// The message is phrased for whoever sent the request, because that is who
+/// has to fix it.
+pub trait Validate {
+    fn validate(&self) -> Result<(), String>;
+}
+
+/// Decodes an action's input.
+///
+/// An absent payload decodes to the default rather than failing, matching the
+/// Go agent's zero value: several actions take an input whose every field is
+/// optional. Unknown fields are refused -- spell a field name wrongly and the
+/// request fails rather than quietly doing something else. Put
+/// `#[serde(deny_unknown_fields)]` on the struct to get that.
+pub fn decode<T>(payload: Option<Value>) -> Result<T, Failure>
+where
+    T: serde::de::DeserializeOwned + Default + Validate,
+{
+    let input: T = match payload {
+        None | Some(Value::Null) => T::default(),
+        Some(v) => serde_json::from_value(v)
+            .map_err(|e| Failure::bad_payload(format!("invalid payload: {e}")))?,
+    };
+    input
+        .validate()
+        .map_err(|e| Failure::bad_payload(format!("invalid payload: {e}")))?;
+    Ok(input)
+}
+
 /// One registered operation.
 pub struct Action {
     pub version: i64,

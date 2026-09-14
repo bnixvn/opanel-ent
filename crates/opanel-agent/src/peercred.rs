@@ -8,6 +8,11 @@ use std::os::unix::net::UnixStream;
 #[derive(Debug, Clone, Copy)]
 pub struct Credential {
     pub uid: u32,
+    /// The kernel reports it and nothing decides on it yet: the socket gates
+    /// by uid. Dropping it from the struct would mean reading half of what
+    /// the kernel handed over and re-adding the field the first time a group
+    /// check is wanted.
+    #[allow(dead_code)]
     pub gid: u32,
     pub pid: i32,
 }

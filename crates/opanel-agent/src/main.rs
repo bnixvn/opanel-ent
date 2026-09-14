@@ -9,6 +9,7 @@
 
 mod actions;
 mod peercred;
+mod platform;
 mod protocol;
 mod registry;
 mod server;

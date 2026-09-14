@@ -4,6 +4,7 @@ use crate::peercred;
 use crate::protocol::{self, Code, Response};
 use crate::registry::Registry;
 use std::io::{BufReader, BufWriter};
+use std::sync::mpsc;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -89,14 +90,14 @@ impl Server {
             }
             inflight.fetch_add(1, Ordering::SeqCst);
             std::thread::spawn(move || {
-                handle(&conn, &registry, &allowed);
+                handle(&conn, registry, &allowed);
                 inflight.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
 }
 
-fn handle(conn: &UnixStream, registry: &Registry, allowed: &[u32]) {
+fn handle(conn: &UnixStream, registry: Arc<Registry>, allowed: &[u32]) {
     // A caller that connects and then stalls must not hold a slot for ever.
     let _ = conn.set_read_timeout(Some(DEFAULT_ACTION_TIMEOUT + Duration::from_secs(30)));
     let _ = conn.set_write_timeout(Some(Duration::from_secs(30)));
@@ -124,8 +125,15 @@ fn handle(conn: &UnixStream, registry: &Registry, allowed: &[u32]) {
         }
     };
 
+    // Now that the action is known, give the connection the budget that
+    // action actually has. The deadline set above was a guess made before
+    // reading the request, and it is too short for a backup.
+    let budget = registry.budget(&req.action, DEFAULT_ACTION_TIMEOUT);
+    let _ = conn.set_read_timeout(Some(budget + Duration::from_secs(30)));
+    let _ = conn.set_write_timeout(Some(budget + Duration::from_secs(30)));
+
     let started = Instant::now();
-    let resp = registry.dispatch(&req);
+    let resp = run_within(registry, &req, budget);
     let ok = resp.ok;
     reply(conn, &resp);
 
@@ -139,6 +147,25 @@ fn handle(conn: &UnixStream, registry: &Registry, allowed: &[u32]) {
         cred.pid,
         started.elapsed().as_millis()
     );
+}
+
+/// Runs the action, answering with a timeout rather than holding the caller
+/// once the budget is spent.
+///
+/// The handler keeps running after that: there is no cancellation to deliver
+/// it, and killing a thread mid-write is how a config file ends up truncated.
+/// Every command it spawns carries its own budget, so it ends on its own; the
+/// caller simply stops waiting, which is what it needed.
+fn run_within(registry: Arc<Registry>, req: &protocol::Request, budget: Duration) -> Response {
+    let (tx, rx) = mpsc::channel();
+    let owned = req.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(registry.dispatch(&owned));
+    });
+    match rx.recv_timeout(budget) {
+        Ok(resp) => resp,
+        Err(_) => Response::failed(&req.id, Code::Timeout, "action timed out"),
+    }
 }
 
 fn reply(conn: &UnixStream, resp: &Response) {

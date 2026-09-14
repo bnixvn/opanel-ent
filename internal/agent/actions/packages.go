@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
@@ -66,7 +67,11 @@ func registerPackages(r *agent.Registry) {
 	// larger grant than reading their status, and nothing in Phase 1 needs
 	// it. Phase 2 adds narrowly scoped actions (php.install, and so on) that
 	// name their own allowlists instead.
-	agent.Register(r, "pkg.upgrade_all", 1, func(ctx context.Context, in UpgradeRequest) (struct{}, error) {
+	// Slow on purpose: pkgmgr gives the transaction twenty minutes, and the
+	// default action budget is two. Registered as a normal action, the
+	// caller was answered "timed out" while dnf was still mid-transaction --
+	// the one moment when the honest answer matters most.
+	agent.RegisterSlow(r, "pkg.upgrade_all", 1, 25*time.Minute, func(ctx context.Context, in UpgradeRequest) (struct{}, error) {
 		return struct{}{}, pkgmgr.UpgradeAll(ctx, in.SecurityOnly)
 	})
 }
