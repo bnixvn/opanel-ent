@@ -151,6 +151,27 @@ func cmdInstall(ctx context.Context, args []string) error {
 	return nil
 }
 
+// splitFlags separates "-x"/"--x" arguments from positional ones, so a flag
+// may appear anywhere in the command line rather than only before the first
+// positional. A bare "--" ends flag parsing, as usual.
+//
+// Boolean flags only: a flag that took its value as the next argument would
+// have that value read as a positional here. Every flag this CLI has is a
+// bool, and one that is not should be spelled --name=value.
+func splitFlags(args []string) (flags, positional []string) {
+	for i, a := range args {
+		switch {
+		case a == "--":
+			return flags, append(positional, args[i+1:]...)
+		case len(a) > 1 && a[0] == '-':
+			flags = append(flags, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	return flags, positional
+}
+
 func cmdCert(ctx context.Context, args []string) error {
 	if len(args) < 1 || args[0] != "issue" {
 		return errors.New("cert: want 'issue <domain> <email> [--staging] [--panel]'")
@@ -158,10 +179,15 @@ func cmdCert(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("cert issue", flag.ContinueOnError)
 	staging := fs.Bool("staging", false, "use the Let's Encrypt staging CA")
 	panel := fs.Bool("panel", false, "point the panel's own TLS at this certificate")
-	if err := fs.Parse(args[1:]); err != nil {
+	// Split the flags out by hand. flag.Parse stops at the first positional,
+	// so the spelling this command documents -- domain first, flags after --
+	// left "--panel" sitting in the argument list where the email goes. It
+	// was then sent to Let's Encrypt as a contact address, and the only
+	// report of the mistake was a 400 from the CA.
+	flags, rest := splitFlags(args[1:])
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	if len(rest) < 1 {
 		return errors.New("cert issue: want <domain> [email]")
 	}
@@ -169,6 +195,9 @@ func cmdCert(ctx context.Context, args []string) error {
 	var email string
 	if len(rest) > 1 {
 		email = rest[1]
+		if !strings.Contains(email, "@") {
+			return fmt.Errorf("cert issue: %q is not an email address", email)
+		}
 	} else {
 		fmt.Println("No contact email given. Let's Encrypt will not be able to warn")
 		fmt.Println("you before this certificate expires; pass one to enable that.")
