@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api, download, fmtBytes, fmtDate } from '../api.js';
 import { Card, Empty, Hint, Message, useConfirm, useMessage } from '../components.jsx';
+import { JobList, useFileJobs } from '../FileJobs.jsx';
 
 // The editor is most of the interface's JavaScript, and it is only needed by
 // somebody who has opened a file. Loading it separately keeps the login page
@@ -208,18 +209,26 @@ export default function Files({ me }) {
     msg.ok(`Uploading ${list.length} file(s)…`);
     try {
       await api.post(`/files/upload?${q(`path=${encodeURIComponent(path)}`)}`, body);
-      msg.ok(`Uploaded ${list.length} file(s)`);
+      // The bytes are on the server; putting them in place is a job now, so
+      // the rest of this is the job list's business rather than a message
+      // that would be wrong the moment it was shown.
+      msg.clear();
       if (fileInput.current) fileInput.current.value = '';
+      await jobs.refresh();
     } catch (err) {
       msg.fail(err);
     }
-    await load();
   }
+
+  // Compressing, extracting and saving an upload run on the server after the
+  // request is answered, so the page watches them rather than waits on them.
+  const jobs = useFileJobs(ownerQ, () => load());
 
   return (
     <>
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
+      <JobList jobs={jobs.jobs} />
 
       <Card>
         <div className="toolbar">
@@ -360,10 +369,10 @@ export default function Files({ me }) {
               const dest = fullPath(archiving.name.trim());
               const paths = selected.map(fullPath);
               setArchiving(null);
-              guard(
-                () => api.post(`/files/archive?${ownerQ}`, { paths, dest }),
-                `Created ${archiving.name.trim()}`,
-              );
+              setSelected([]);
+              api.post(`/files/archive?${ownerQ}`, { paths, dest })
+                .then(() => jobs.refresh())
+                .catch((err) => msg.fail(err));
             }}
           >
             <div className="field" style={{ flex: '0 1 20rem' }}>
@@ -500,15 +509,14 @@ export default function Files({ me }) {
                                 if (!ok) return;
                                 setBusy(true);
                                 try {
-                                  const res = await api.post(`/files/extract?${ownerQ}`, {
+                                  await api.post(`/files/extract?${ownerQ}`, {
                                     path: full, dest: path,
                                   });
-                                  msg.ok(`Extracted ${res.entries} item(s), ${fmtBytes(res.bytes)}`);
+                                  await jobs.refresh();
                                 } catch (err) {
                                   msg.fail(err);
                                 }
                                 setBusy(false);
-                                await load();
                               }}
                             >
                               Extract

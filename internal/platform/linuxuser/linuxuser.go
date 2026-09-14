@@ -69,7 +69,10 @@ func Home(username string) string { return path.Join(HomeBase, username) }
 
 // Lookup returns an existing account, or nil when it does not exist.
 func Lookup(username string) (*Account, error) {
-	if !ValidName(username) {
+	// The name pattern only: a reserved name is one this package refuses to
+	// create, not one it refuses to look at. Checking reservation here would
+	// mean the code that has to ask "is root already an account" cannot.
+	if !namePattern.MatchString(username) {
 		return nil, fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	u, err := user.Lookup(username)
@@ -97,6 +100,13 @@ func Create(ctx context.Context, username string) (*Account, error) {
 	if !ValidName(username) {
 		return nil, fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
+	return create(ctx, username)
+}
+
+// create is Create with the name already judged. Two callers judge it
+// differently -- a customer's name against the reserved list, an operator's
+// against the passwd file -- and only one of them can be right for both.
+func create(ctx context.Context, username string) (*Account, error) {
 	if acct, err := Lookup(username); err != nil {
 		return nil, err
 	} else if acct != nil {
@@ -447,3 +457,61 @@ func RepairHomes(ctx context.Context) ([]string, error) {
 	}
 	return fixed, nil
 }
+
+// CreateStaff makes an account for an operator rather than a customer.
+//
+// The reserved list exists to stop a customer taking a name like "admin" or
+// "mail" and being mistaken for something else. An operator asking for their
+// own login is the opposite case: on a panel whose administrator is called
+// admin, refusing to make /home/admin for them protects nobody, and the name
+// stays reserved against customers either way.
+//
+// What is checked instead is the property the list was standing in for: an
+// existing account below the system uid threshold is a real system account,
+// and this must never adopt one. Checked here, at the root end, because this
+// is the process that would do the adopting.
+func CreateStaff(ctx context.Context, username string) (*Account, error) {
+	if !namePattern.MatchString(username) {
+		return nil, fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
+	}
+	existing, err := Lookup(username)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.UID < SystemUIDMax {
+			return nil, fmt.Errorf("linuxuser: %q is a system account on this server", username)
+		}
+		return existing, nil
+	}
+	return create(ctx, username)
+}
+
+// SystemUIDMax is the boundary login.defs draws between accounts the
+// distribution owns and accounts people are given. Anything below it belongs
+// to a package, not a person.
+const SystemUIDMax = 1000
+
+// Managed reports whether an account is one this panel made.
+//
+// Membership of the SFTP group is the mark, which covers site owners, the
+// operator accounts CreateStaff makes, and the extra SFTP credentials. It is
+// a better rule than a list of names for deciding what may be changed: it
+// answers "did we create this" rather than "does this look dangerous", and
+// an account the panel did not create is one it has no business touching
+// whatever it happens to be called.
+func Managed(username string) (bool, error) {
+	if !namePattern.MatchString(username) {
+		return false, nil
+	}
+	names, err := groupMembers(SFTPGroup)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(names, username), nil
+}
+
+// PlausibleName reports whether a name is the right shape for a Linux
+// account, without judging whether it may be used. Callers that are about to
+// change an existing account want this; callers creating one want ValidName.
+func PlausibleName(n string) bool { return namePattern.MatchString(n) }

@@ -200,7 +200,11 @@ func (s *TerminalServer) reject(conn net.Conn, msg string) {
 // of the SFTP group is what marks them -- which excludes root, every system
 // account, and anything an operator made by hand.
 func (s *TerminalServer) resolve(username string) (*linuxuser.Account, error) {
-	if !linuxuser.ValidName(username) {
+	// The shape only. Whether this account may have a shell is the next
+	// check, and it is the one that means something: ValidName refuses names
+	// a customer may not take, which is a different question and would bar
+	// an operator from their own.
+	if !linuxuser.PlausibleName(username) {
 		return nil, errors.New("not an account name")
 	}
 	managed, err := linuxuser.List(context.Background())

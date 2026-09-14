@@ -318,3 +318,44 @@ func (s *Service) SetSFTPPassword(ctx context.Context, id int64) (string, error)
 	}
 	return codes[0], nil
 }
+
+// EnableFileAccess gives a staff account a Linux user of its own.
+//
+// Administrators and resellers have none by default: they do not own
+// websites, so there is nothing for one to hold. But an operator does need
+// somewhere on the server to put things -- a backup fetched with curl, an
+// archive to unpack, a file to hand to a customer -- and without an account
+// there is no shell to run curl in and no credential to upload with.
+//
+// It is an ordinary unprivileged account, the same kind a customer gets, and
+// deliberately not root. The panel's whole design is that it asks the agent
+// for named operations rather than running commands as root; a root shell
+// reachable from a panel session would hand anybody who stole that session
+// the machine, and hand it to them past every check in this codebase.
+func (s *Service) EnableFileAccess(ctx context.Context, id int64) (string, error) {
+	user, err := s.db.UserByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if user.LinuxUID != nil && *user.LinuxUID != 0 {
+		return "", errors.New("panelusers: this account already has file access")
+	}
+	acct, err := agentclient.Call[linuxuser.Account](ctx, s.agent, "linuxuser.create_staff", 1,
+		actions.StaffAccountRequest{Username: user.Username})
+	if err != nil {
+		return "", fmt.Errorf("create Linux account: %w", err)
+	}
+	if err := s.db.SetUserLinuxAccount(ctx, user.ID, acct.UID, acct.Home); err != nil {
+		return "", err
+	}
+
+	password, err := auth.NewRecoveryCodes(1)
+	if err != nil {
+		return "", err
+	}
+	if _, err := agentclient.Call[struct{}](ctx, s.agent, "linuxuser.set_password", 1,
+		actions.AccountPasswordRequest{Username: user.Username, Password: password[0]}); err != nil {
+		return "", fmt.Errorf("set SFTP password: %w", err)
+	}
+	return password[0], nil
+}

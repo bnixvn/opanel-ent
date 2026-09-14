@@ -70,10 +70,61 @@ func (s *Server) sftpOwner(w http.ResponseWriter, r *http.Request) *db.User {
 
 	if target.LinuxUID == nil || *target.LinuxUID == 0 {
 		writeError(w, http.StatusBadRequest, "no_linux_account",
-			"this account has no files on the server, so there is nothing to give SFTP access to")
+			"this account has no files on the server yet")
 		return nil
 	}
 	return target
+}
+
+// handleFileAccessEnable gives the signed-in account a Linux user.
+//
+// Staff do not get one when they are created, because they own no websites.
+// They ask for one when they want somewhere on the server to work: a shell
+// to run curl in, a place to put a backup, a credential to upload with.
+func (s *Server) handleFileAccessEnable(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if u.LinuxUID != nil && *u.LinuxUID != 0 {
+		writeError(w, http.StatusConflict, "exists", "this account already has file access")
+		return
+	}
+	password, err := s.users.EnableFileAccess(r.Context(), u.ID)
+	if err != nil {
+		s.audit(r, "account.file_access", u.Username, false, err.Error())
+		writeError(w, http.StatusBadRequest, "failed", err.Error())
+		return
+	}
+	s.audit(r, "account.file_access", u.Username, true, "")
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"username": u.Username,
+		"password": password,
+		"host":     s.sftpHost(r),
+		"port":     22,
+	})
+}
+
+// handleSFTPPrimaryPassword resets the password on the account's own login.
+//
+// The extra credentials each had a reset button and the login the account is
+// actually named after did not, which left the one everybody uses as the
+// only one that could not be changed without asking staff.
+func (s *Server) handleSFTPPrimaryPassword(w http.ResponseWriter, r *http.Request) {
+	owner := s.sftpOwner(w, r)
+	if owner == nil {
+		return
+	}
+	password, err := s.users.SetSFTPPassword(r.Context(), owner.ID)
+	if err != nil {
+		s.audit(r, "sftp.password", owner.Username, false, err.Error())
+		writeError(w, http.StatusBadRequest, "failed", err.Error())
+		return
+	}
+	s.audit(r, "sftp.password", owner.Username, true, "own account")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"username": owner.Username,
+		"password": password,
+		"host":     s.sftpHost(r),
+		"port":     22,
+	})
 }
 
 func (s *Server) handleSFTPList(w http.ResponseWriter, r *http.Request) {

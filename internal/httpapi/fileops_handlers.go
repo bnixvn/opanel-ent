@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
+
+	"github.com/bnixvn/opanel-ent/internal/db"
 )
 
 func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +53,11 @@ func (s *Server) handleFileChmodRecursive(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"mode": req.Mode})
 }
 
+// handleFileArchive packs paths into an archive, in the background.
+//
+// Answering with a job rather than the finished archive is the point: packing
+// a few gigabytes takes minutes, and on the request's own context the work
+// stopped the moment the tab closed or the phone changed network.
 func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) {
 	o, ok := s.owner(w, r)
 	if !ok {
@@ -62,15 +70,26 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.files.Archive(r.Context(), o, req.Paths, req.Dest); err != nil {
-		s.fileError(w, "archive", err)
-		return
-	}
 	s.audit(r, "file.archive", o.Username+":"+req.Dest, true,
 		strings.Join(req.Paths, ", "))
-	writeJSON(w, http.StatusOK, map[string]any{"archive": req.Dest})
+
+	job, err := s.startFileJob(r, o, db.FileJobArchive, req.Dest,
+		func(ctx context.Context) (string, error) {
+			if err := s.files.Archive(ctx, o, req.Paths, req.Dest); err != nil {
+				return "", err
+			}
+			return "packed " + describePaths(req.Paths), nil
+		})
+	if err != nil {
+		s.log.Error("httpapi: start archive job", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"job": viewFileJob(job)})
 }
 
+// handleFileExtract unpacks an archive, in the background, for the same
+// reason as handleFileArchive.
 func (s *Server) handleFileExtract(w http.ResponseWriter, r *http.Request) {
 	o, ok := s.owner(w, r)
 	if !ok {
@@ -83,11 +102,20 @@ func (s *Server) handleFileExtract(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	res, err := s.files.Extract(r.Context(), o, req.Path, req.Dest)
+	s.audit(r, "file.extract", o.Username+":"+req.Path, true, req.Dest)
+
+	job, err := s.startFileJob(r, o, db.FileJobExtract, req.Path,
+		func(ctx context.Context) (string, error) {
+			res, err := s.files.Extract(ctx, o, req.Path, req.Dest)
+			if err != nil {
+				return "", err
+			}
+			return trimDetail("unpacked into " + res.Dest), nil
+		})
 	if err != nil {
-		s.fileError(w, "extract", err)
+		s.log.Error("httpapi: start extract job", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	s.audit(r, "file.extract", o.Username+":"+req.Path, true, res.Dest)
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusAccepted, map[string]any{"job": viewFileJob(job)})
 }

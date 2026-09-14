@@ -72,6 +72,15 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		loginLimiter: newLimiter(5, time.Minute),
 	}
 	s.handler = s.routes()
+
+	// A job is a goroutine and nothing more, so a restart takes every
+	// running one with it. Saying so beats a row that claims to be running
+	// for ever and a page that waits on it.
+	if n, err := database.FailRunningFileJobs(context.Background()); err != nil {
+		log.Warn("httpapi: could not close out interrupted file jobs", "err", err)
+	} else if n > 0 {
+		log.Info("httpapi: closed out file jobs interrupted by a restart", "jobs", n)
+	}
 	return s
 }
 
@@ -189,8 +198,10 @@ func (s *Server) routes() http.Handler {
 			// one of their customers; the agent decides whether to grant it.
 			pr.Get("/terminal/status", s.handleTerminalStatus)
 			pr.Get("/terminal", s.handleTerminal)
+			pr.Post("/account/file-access", s.handleFileAccessEnable)
 			pr.Get("/sftp", s.handleSFTPList)
 			pr.Post("/sftp", s.handleSFTPCreate)
+			pr.Post("/sftp/primary/password", s.handleSFTPPrimaryPassword)
 			pr.Post("/sftp/{id}/password", s.handleSFTPPassword)
 			pr.Delete("/sftp/{id}", s.handleSFTPDelete)
 			pr.Get("/cron", s.handleCronList)
@@ -220,6 +231,10 @@ func (s *Server) routes() http.Handler {
 			pr.Post("/files/archive", s.handleFileArchive)
 			pr.Post("/files/extract", s.handleFileExtract)
 			pr.Post("/files/upload", s.handleFileUpload)
+			// Packing, unpacking and installing an upload run in the
+			// background; these are how a page finds out how they went.
+			pr.Get("/file-jobs", s.handleFileJobList)
+			pr.Get("/file-jobs/{id}", s.handleFileJobGet)
 			pr.Get("/files/download", s.handleFileDownload)
 			pr.Delete("/files", s.handleFileDelete)
 

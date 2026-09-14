@@ -47,9 +47,29 @@ type AccountDeleteRequest struct {
 	RemoveHome bool `json:"remove_home"`
 }
 
-// Validate checks the account name.
+// Validate checks the shape of the name. Whether this account may be deleted
+// is decided against the group file, not against a list of names: the panel
+// makes accounts a customer may not ask for, and refusing to delete one on
+// the same rule that refuses to create it would strand them.
 func (r *AccountDeleteRequest) Validate() error {
-	return (&AccountRequest{Username: r.Username}).Validate()
+	if !linuxuser.PlausibleName(r.Username) {
+		return fmt.Errorf("%q is not an acceptable account name", r.Username)
+	}
+	return nil
+}
+
+// StaffAccountRequest asks for an operator's own Linux account.
+type StaffAccountRequest struct {
+	Username string `json:"username"`
+}
+
+// Validate checks the shape of the name only. Whether it may be taken is the
+// agent's decision, made against the passwd file rather than a list.
+func (r *StaffAccountRequest) Validate() error {
+	if r.Username == "" {
+		return fmt.Errorf("username is required")
+	}
+	return nil
 }
 
 // SFTPCredentialRequest adds a second credential to an existing account.
@@ -72,10 +92,12 @@ type AccountPasswordRequest struct {
 	Password string `json:"password"`
 }
 
-// Validate checks the account name and that a password was supplied.
+// Validate checks the shape of the name and that a password was supplied.
+// Whether the account may have its password set is decided in the handler,
+// against the group file.
 func (r *AccountPasswordRequest) Validate() error {
-	if err := (&AccountRequest{Username: r.Username}).Validate(); err != nil {
-		return err
+	if !linuxuser.PlausibleName(r.Username) {
+		return fmt.Errorf("%q is not an acceptable account name", r.Username)
 	}
 	if len(r.Password) < 12 {
 		return fmt.Errorf("password must be at least 12 characters")
@@ -297,6 +319,16 @@ func registerSites(r *agent.Registry, deps Deps) {
 		return *acct, nil
 	})
 
+	// Staff accounts go through their own action, because the name rules
+	// differ: an operator may hold a name a customer may not.
+	agent.Register(r, "linuxuser.create_staff", 1, func(ctx context.Context, in StaffAccountRequest) (linuxuser.Account, error) {
+		acct, err := linuxuser.CreateStaff(ctx, in.Username)
+		if err != nil {
+			return linuxuser.Account{}, err
+		}
+		return *acct, nil
+	})
+
 	agent.Register(r, "linuxuser.create_sftp", 1, func(ctx context.Context, in SFTPCredentialRequest) (linuxuser.Account, error) {
 		acct, err := linuxuser.CreateSFTP(ctx, in.Username, in.Owner)
 		if err != nil {
@@ -306,10 +338,16 @@ func registerSites(r *agent.Registry, deps Deps) {
 	})
 
 	agent.Register(r, "linuxuser.delete", 1, func(ctx context.Context, in AccountDeleteRequest) (struct{}, error) {
+		if err := refuseUnmanaged(in.Username); err != nil {
+			return struct{}{}, err
+		}
 		return struct{}{}, linuxuser.Delete(ctx, in.Username, in.RemoveHome)
 	})
 
 	agent.Register(r, "linuxuser.set_password", 1, func(ctx context.Context, in AccountPasswordRequest) (struct{}, error) {
+		if err := refuseUnmanaged(in.Username); err != nil {
+			return struct{}{}, err
+		}
 		return struct{}{}, linuxuser.SetPassword(ctx, in.Username, in.Password)
 	})
 
@@ -555,4 +593,20 @@ func wafRulesIfInstalled() string {
 		return ""
 	}
 	return wafRulesFile
+}
+
+// refuseUnmanaged stops the agent changing an account the panel did not make.
+//
+// The check belongs here rather than in Validate because it reads the group
+// file: a request is well-formed or not on its own, but whether it may be
+// carried out is a question about the server.
+func refuseUnmanaged(username string) error {
+	managed, err := linuxuser.Managed(username)
+	if err != nil {
+		return fmt.Errorf("cannot tell whether %q is an account this panel made: %w", username, err)
+	}
+	if !managed {
+		return fmt.Errorf("%q is not an account this panel manages", username)
+	}
+	return nil
 }

@@ -457,6 +457,40 @@ dl.kv dd { margin: 0; }
   background: var(--accent-soft);
 }
 
+/* ---------- background file jobs ---------- */
+
+.jobs { margin-bottom: 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.job {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 0.82rem;
+}
+.job.running { border-left-color: var(--accent); }
+.job.done { border-left-color: var(--ok); }
+.job.failed { border-left-color: var(--bad); }
+.job .spacer { flex: 1; }
+.jobkind { font-weight: 600; }
+.jobtarget {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24rem;
+}
+.job.failed .jobstate { color: var(--bad); }
+.jobtime { font-size: 0.75rem; }
+@media (max-width: 46rem) {
+  .job { flex-wrap: wrap; }
+  .jobtarget { max-width: 100%; }
+}
+
 /* ---------- terminal ---------- */
 
 .terminal { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }

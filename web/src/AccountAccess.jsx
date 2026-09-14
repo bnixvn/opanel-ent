@@ -13,15 +13,17 @@ export function TerminalCard() {
   const [status, setStatus] = useState(null);
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
+  const check = useCallback(() => {
     api.get('/terminal/status').then(setStatus).catch(() => setStatus({ available: false }));
   }, []);
+
+  useEffect(() => { check(); }, [check]);
 
   if (!status) return null;
   if (!status.available) {
     return (
       <Card title="Terminal">
-        <Empty>{status.reason || 'No shell is available for this account.'}</Empty>
+        <EnableAccess reason={status.reason} canEnable={status.can_enable} onEnabled={check} />
       </Card>
     );
   }
@@ -73,7 +75,13 @@ export function SFTPCard() {
   if (data.unavailable) {
     return (
       <Card title="SFTP">
-        <Empty>{data.unavailable}</Empty>
+        <EnableAccess
+          reason={data.unavailable}
+          canEnable
+          onEnabled={load}
+          onCredentials={setMade}
+        />
+        {made && <NewCredentials made={made} onClose={() => setMade(null)} />}
       </Card>
     );
   }
@@ -91,6 +99,21 @@ export function SFTPCard() {
         <Copyable label="Port" value={String(data.port || 22)} />
         <Copyable label="Username" value={data.primary} hint="The account's own login. It cannot be removed." />
       </div>
+      <p style={{ margin: '.2rem 0 0' }}>
+        <button
+          type="button"
+          onClick={async () => {
+            msg.clear();
+            try {
+              setMade(await api.post('/sftp/primary/password', {}));
+            } catch (err) {
+              msg.fail(err);
+            }
+          }}
+        >
+          Reset this password
+        </button>
+      </p>
 
       <h3 className="subhead">
         Extra credentials
@@ -162,20 +185,7 @@ export function SFTPCard() {
         </div>
       )}
 
-      {made && (
-        <div className="madecreds">
-          <div className="grid2">
-            <Copyable label="Host" value={made.host} />
-            <Copyable label="Port" value={String(made.port || 22)} />
-            <Copyable label="Username" value={made.username || (made.account && made.account.username)} />
-            <Copyable label="Password" value={made.password} />
-          </div>
-          <p className="muted" style={{ margin: '.2rem 0 .6rem', fontSize: '.82rem' }}>
-            The password is shown once.
-          </p>
-          <button type="button" onClick={() => setMade(null)}>Close</button>
-        </div>
-      )}
+      {made && <NewCredentials made={made} onClose={() => setMade(null)} />}
 
       {!full && (
         <form
@@ -234,5 +244,66 @@ export function SFTPCard() {
         </form>
       )}
     </Card>
+  );
+}
+
+function NewCredentials({ made, onClose }) {
+  return (
+    <div className="madecreds">
+      <div className="grid2">
+        <Copyable label="Host" value={made.host} />
+        <Copyable label="Port" value={String(made.port || 22)} />
+        <Copyable
+          label="Username"
+          value={made.username || (made.account && made.account.username)}
+        />
+        <Copyable label="Password" value={made.password} />
+      </div>
+      <p className="muted" style={{ margin: '.2rem 0 .6rem', fontSize: '.82rem' }}>
+        The password is shown once.
+      </p>
+      <button type="button" onClick={onClose}>Close</button>
+    </div>
+  );
+}
+
+// EnableAccess offers an account with no Linux user one.
+//
+// Administrators and resellers start without one because they own no
+// websites, which leaves them no shell to run curl in and nowhere to put a
+// backup they fetched. This makes one on request: an ordinary unprivileged
+// account with a home of its own, not root.
+function EnableAccess({ reason, canEnable, onEnabled, onCredentials }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!canEnable) return <Empty>{reason}</Empty>;
+
+  return (
+    <>
+      <Empty>{reason}</Empty>
+      {error && <div className="msg err">{error}</div>}
+      <p style={{ textAlign: 'center', margin: '.6rem 0 0' }}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              const res = await api.post('/account/file-access', {});
+              if (onCredentials) onCredentials(res);
+              if (onEnabled) onEnabled();
+            } catch (err) {
+              setError(err && err.message ? err.message : String(err));
+            }
+            setBusy(false);
+          }}
+        >
+          {busy ? 'Setting up…' : 'Add a Linux user for this account'}
+        </button>
+      </p>
+    </>
   );
 }

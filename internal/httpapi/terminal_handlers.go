@@ -24,9 +24,10 @@ func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	if u.LinuxUID == nil || *u.LinuxUID == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"available": false,
-			"reason": "This account has no files on the server. Only hosting accounts " +
-				"have a Linux user to open a shell as.",
+			"available":  false,
+			"can_enable": true,
+			"reason": "This account has no Linux user yet. Adding one gives it a " +
+				"home directory on the server, a shell, and an SFTP login.",
 		})
 		return
 	}

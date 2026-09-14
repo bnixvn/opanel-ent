@@ -179,45 +179,80 @@ func (f *StagedFile) Close() error {
 // ErrTooLarge means the upload exceeded the limit the caller set.
 var ErrTooLarge = errors.New("filemanager: the file is larger than the upload limit")
 
-// Upload stages an incoming file and asks the agent to install it as the
-// owner. The staged copy is removed whether or not the install succeeds.
+// Stage writes an incoming file to the panel's own spool and returns the
+// path it landed at. The caller owns that file from then on: Install removes
+// it, and a caller that gives up must call Discard.
+//
+// Split from Install so the two halves can have different fates. Receiving
+// the bytes needs the request that is carrying them, and dies with it --
+// there is no way around that, the browser is the source. Putting them in
+// place afterwards does not, and used to be cancelled along with it, so a
+// connection that dropped between the last byte and the install left the
+// upload nowhere.
 //
 // limit is checked while copying rather than from a Content-Length header,
 // which a client is free to understate.
-func (s *Service) Upload(ctx context.Context, owner Owner, dest string, src io.Reader, limit int64) error {
+func (s *Service) Stage(src io.Reader, limit int64) (string, error) {
 	if err := os.MkdirAll(actions.UploadStageDir, 0o750); err != nil {
-		return fmt.Errorf("prepare upload directory: %w", err)
+		return "", fmt.Errorf("prepare upload directory: %w", err)
 	}
 	tmp, err := os.CreateTemp(actions.UploadStageDir, "upload-*")
 	if err != nil {
-		return err
+		return "", err
 	}
 	staged := tmp.Name()
-	// Removed here as well as in the agent: the agent only gets the chance
-	// when the call reaches it, and a client that hangs up mid-body must not
-	// leave the panel's state directory filling with half-written uploads.
-	defer func() { _ = os.Remove(staged) }()
 
 	n, err := io.Copy(tmp, io.LimitReader(src, limit+1))
 	if err != nil {
 		_ = tmp.Close()
-		return err
+		_ = os.Remove(staged)
+		return "", err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		_ = os.Remove(staged)
+		return "", err
 	}
 	if n > limit {
-		return ErrTooLarge
+		_ = os.Remove(staged)
+		return "", ErrTooLarge
 	}
 	// The agent reads this as root, so mode is about the other accounts on
 	// the host, not about the agent.
 	if err := os.Chmod(staged, 0o640); err != nil {
-		return err
+		_ = os.Remove(staged)
+		return "", err
 	}
+	return staged, nil
+}
 
-	_, err = agentclient.Call[struct{}](ctx, s.agent, "fs.install", 1,
+// Discard drops a staged file the caller has decided not to install.
+func (s *Service) Discard(staged string) {
+	if staged != "" {
+		_ = os.Remove(staged)
+	}
+}
+
+// Install asks the agent to put a staged file in place as the owner. The
+// staged copy is removed whether or not it succeeds.
+func (s *Service) Install(ctx context.Context, owner Owner, dest, staged string) error {
+	// Removed here as well as in the agent: the agent only gets the chance
+	// when the call reaches it, and a call that never arrives must not leave
+	// the panel's state directory filling with orphans.
+	defer func() { _ = os.Remove(staged) }()
+
+	_, err := agentclient.Call[struct{}](ctx, s.agent, "fs.install", 1,
 		actions.FileInstallRequest{Owner: owner.Username, Path: clean(dest), StagedPath: staged})
 	return err
+}
+
+// Upload stages a file and installs it in one go, for callers with nothing
+// long-running to protect.
+func (s *Service) Upload(ctx context.Context, owner Owner, dest string, src io.Reader, limit int64) error {
+	staged, err := s.Stage(src, limit)
+	if err != nil {
+		return err
+	}
+	return s.Install(ctx, owner, dest, staged)
 }
 
 // clean normalises a path from the browser into the relative form the agent

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
+	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/filemanager"
 )
 
@@ -258,6 +260,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var saved []string
+	var pending []stagedUpload
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -281,18 +284,29 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dest := path.Join(dir, name)
-		err = s.files.Upload(r.Context(), o, dest, part, MaxUploadBytes)
+		// Receiving the bytes has to happen on this request -- the browser is
+		// the source -- so that half cannot be moved off it. Putting them in
+		// place afterwards can be, and is: a connection that drops between
+		// the last byte and the install used to lose the upload entirely.
+		staged, err := s.files.Stage(part, MaxUploadBytes)
 		_ = part.Close()
 		if errors.Is(err, filemanager.ErrTooLarge) {
+			for _, p := range pending {
+				s.files.Discard(p.staged)
+			}
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large",
 				fmt.Sprintf("%s is larger than the %d MB upload limit; use SFTP for files this size",
 					name, MaxUploadBytes>>20))
 			return
 		}
 		if err != nil {
+			for _, p := range pending {
+				s.files.Discard(p.staged)
+			}
 			s.fileError(w, "upload", err)
 			return
 		}
+		pending = append(pending, stagedUpload{dest: dest, staged: staged})
 		saved = append(saved, dest)
 	}
 	if len(saved) == 0 {
@@ -300,7 +314,39 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "file.upload", o.Username+":"+strings.Join(saved, " "), true, "")
-	writeJSON(w, http.StatusCreated, map[string]any{"uploaded": saved})
+
+	job, err := s.startFileJob(r, o, db.FileJobUpload, describePaths(saved),
+		func(ctx context.Context) (string, error) {
+			for _, p := range pending {
+				if err := s.files.Install(ctx, o, p.dest, p.staged); err != nil {
+					// Whatever is left unstaged is dropped: a partial upload
+					// somebody is not being told about is worse than none.
+					for _, rest := range pending {
+						s.files.Discard(rest.staged)
+					}
+					return "", err
+				}
+			}
+			return trimDetail("saved " + strings.Join(saved, ", ")), nil
+		})
+	if err != nil {
+		for _, p := range pending {
+			s.files.Discard(p.staged)
+		}
+		s.log.Error("httpapi: start upload job", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"uploaded": saved,
+		"job":      viewFileJob(job),
+	})
+}
+
+// stagedUpload is one received file waiting to be put in place.
+type stagedUpload struct {
+	dest   string
+	staged string
 }
 
 // handleFileLimits tells the browser what the server will accept, so the UI
