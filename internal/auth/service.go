@@ -145,19 +145,26 @@ func (s *Service) checkSecondFactor(ctx context.Context, u *db.User, code string
 }
 
 func (s *Service) newSession(ctx context.Context, userID int64, ip, userAgent string) (*db.Session, string, error) {
+	return s.newSessionAs(ctx, userID, 0, ip, userAgent)
+}
+
+// newSessionAs creates a session, optionally recording the member of staff
+// driving it.
+func (s *Service) newSessionAs(ctx context.Context, userID, impersonatorID int64, ip, userAgent string) (*db.Session, string, error) {
 	cookie, err := randomToken(32)
 	if err != nil {
 		return nil, "", err
 	}
 	now := s.now().UTC()
 	sess := &db.Session{
-		ID:         hashSecret(cookie),
-		UserID:     userID,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(s.sessionTTL),
-		LastSeenAt: now,
-		IP:         ip,
-		UserAgent:  truncate(userAgent, 512),
+		ID:             hashSecret(cookie),
+		UserID:         userID,
+		ImpersonatorID: impersonatorID,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(s.sessionTTL),
+		LastSeenAt:     now,
+		IP:             ip,
+		UserAgent:      truncate(userAgent, 512),
 	}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		return nil, "", err

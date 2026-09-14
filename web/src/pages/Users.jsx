@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtBytes } from '../api.js';
 import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
 
-export default function Users({ me }) {
+export default function Users({ me, onImpersonated }) {
   const [users, setUsers] = useState([]);
   const [plans, setPlans] = useState([]);
   const [usage, setUsage] = useState({});
@@ -164,6 +164,34 @@ export default function Users({ me }) {
                         >
                           Reset password
                         </button>{' '}
+                        {u.id !== me.id && u.role === 'end_user' && !u.suspended && (
+                          <>
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={async () => {
+                                const ok = await ask({
+                                  title: `Sign in as ${u.username}?`,
+                                  body:
+                                    'The panel will show exactly what this customer sees, '
+                                    + 'and anything you do will be done as them. A banner '
+                                    + 'stays on screen until you come back, and both the '
+                                    + 'start and the end are recorded in the audit log.',
+                                  confirmLabel: 'Sign in as them',
+                                });
+                                if (!ok) return;
+                                try {
+                                  const res = await api.post(`/users/${u.id}/impersonate`, {});
+                                  onImpersonated(res.user);
+                                } catch (err) {
+                                  msg.fail(err);
+                                }
+                              }}
+                            >
+                              Log in as
+                            </button>{' '}
+                          </>
+                        )}
                         {u.id !== me.id && (
                           <>
                             <button

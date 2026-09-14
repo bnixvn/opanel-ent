@@ -18,6 +18,7 @@ type ctxKey int
 const (
 	ctxKeyUser ctxKey = iota
 	ctxKeyToken
+	ctxKeySession
 )
 
 // SessionCookieName is the cookie holding the session secret.
@@ -34,6 +35,22 @@ func userFrom(ctx context.Context) *db.User {
 func tokenFrom(ctx context.Context) *db.APIToken {
 	t, _ := ctx.Value(ctxKeyToken).(*db.APIToken)
 	return t
+}
+
+// sessionFrom returns the session backing the request, or nil for a request
+// authenticated with a bearer token.
+func sessionFrom(ctx context.Context) *db.Session {
+	s, _ := ctx.Value(ctxKeySession).(*db.Session)
+	return s
+}
+
+// impersonatorFrom returns the id of the member of staff driving this
+// session, or 0 when the caller is signed in as themselves.
+func impersonatorFrom(ctx context.Context) int64 {
+	if s := sessionFrom(ctx); s != nil {
+		return s.ImpersonatorID
+	}
+	return 0
 }
 
 // clientIP extracts the caller address. Proxy headers are deliberately
@@ -128,13 +145,15 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 			return
 		}
-		u, _, err := s.auth.ValidateSession(ctx, c.Value)
+		u, sess, err := s.auth.ValidateSession(ctx, c.Value)
 		if err != nil {
 			s.clearSessionCookie(w)
 			s.rejectAuth(w, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, ctxKeyUser, u)))
+		ctx = context.WithValue(ctx, ctxKeyUser, u)
+		ctx = context.WithValue(ctx, ctxKeySession, sess)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

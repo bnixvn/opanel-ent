@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, setUnauthorizedHandler } from './api.js';
 import Login from './Login.jsx';
 import Sites from './pages/Sites.jsx';
@@ -54,6 +54,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [quota, setQuota] = useState(null);
   const location = useLocation();
+  const navigate = useNavigate();
 
   const signOut = useCallback(() => setMe(null), []);
 
@@ -146,6 +147,30 @@ export default function App() {
       </nav>
 
       <div className="main">
+        {me.impersonated && (
+          <div className="banner bad" style={{ display: 'flex', gap: '.8rem', alignItems: 'center' }}>
+            <span style={{ flex: 1 }}>
+              You are signed in as <strong>{me.username}</strong>
+              {me.impersonated_by ? <> — your own account is <strong>{me.impersonated_by}</strong></> : null}.
+              Everything you do here is done as this customer.
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const res = await api.post('/auth/impersonate/stop', {});
+                  setMe(res.user);
+                  navigate('/users');
+                } catch {
+                  signOut();
+                }
+              }}
+            >
+              Back to my account
+            </button>
+          </div>
+        )}
+
         {quota && !quota.enforced && role === 'admin' && (
           <div className="banner">
             {quota.pending_reboot
@@ -173,7 +198,15 @@ export default function App() {
             <Route path="/account" element={<Account me={me} />} />
             {(role === 'admin' || role === 'reseller') && (
               <>
-                <Route path="/users" element={<Users me={me} />} />
+                <Route
+                  path="/users"
+                  element={(
+                    <Users
+                      me={me}
+                      onImpersonated={(u) => { setMe({ ...u, impersonated: true, impersonated_by: me.username }); navigate('/'); }}
+                    />
+                  )}
+                />
                 <Route path="/packages" element={<Packages me={me} />} />
               </>
             )}

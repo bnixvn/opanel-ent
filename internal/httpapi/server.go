@@ -97,6 +97,9 @@ func (s *Server) routes() http.Handler {
 
 			pr.Post("/auth/logout", s.handleLogout)
 			pr.Get("/auth/me", s.handleMe)
+			// Available to the customer account the operator is wearing --
+			// it is the way back out, so it cannot need staff rights.
+			pr.Post("/auth/impersonate/stop", s.handleStopImpersonating)
 
 			// Sites. Ownership is enforced per request inside the handlers,
 			// so an end user reaches the same routes and sees only their own.
@@ -135,11 +138,18 @@ func (s *Server) routes() http.Handler {
 			pr.Delete("/database-users/{id}", s.handleDBUserDelete)
 			pr.Post("/database-users/{id}/password", s.handleDBUserPassword)
 
-			// Own account.
-			pr.Post("/auth/password", s.handleChangeOwnPassword)
-			pr.Post("/auth/2fa/setup", s.handleTOTPSetup)
-			pr.Post("/auth/2fa/enable", s.handleTOTPEnable)
-			pr.Post("/auth/2fa/disable", s.handleTOTPDisable)
+			// Own account. Not while wearing somebody else's: a password or
+			// second factor changed from inside an impersonated session
+			// would be recorded against the customer, and the account holder
+			// has to be able to tell what they did from what was done to
+			// them.
+			pr.Group(func(own chi.Router) {
+				own.Use(s.refuseWhileImpersonating)
+				own.Post("/auth/password", s.handleChangeOwnPassword)
+				own.Post("/auth/2fa/setup", s.handleTOTPSetup)
+				own.Post("/auth/2fa/enable", s.handleTOTPEnable)
+				own.Post("/auth/2fa/disable", s.handleTOTPDisable)
+			})
 
 			// Usage against the assigned package. Readable by the account
 			// itself; staff may read anyone's.
@@ -196,6 +206,7 @@ func (s *Server) routes() http.Handler {
 				rr.Patch("/users/{id}", s.handleUserUpdate)
 				rr.Delete("/users/{id}", s.handleUserDelete)
 				rr.Post("/users/{id}/password", s.handleUserPassword)
+				rr.Post("/users/{id}/impersonate", s.handleImpersonate)
 				rr.Post("/users/{id}/sftp-password", s.handleUserSFTPPassword)
 				rr.Post("/users/{id}/plan", s.handleUserPlanAssign)
 				rr.Post("/plans", s.handlePlanCreate)

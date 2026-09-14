@@ -29,6 +29,11 @@ type Session struct {
 	LastSeenAt time.Time
 	IP         string
 	UserAgent  string
+	// ImpersonatorID is the member of staff driving this session, or 0 for
+	// an ordinary sign-in. The session still belongs to UserID: that is what
+	// makes every permission check see the customer rather than the
+	// operator.
+	ImpersonatorID int64
 }
 
 type APIToken struct {

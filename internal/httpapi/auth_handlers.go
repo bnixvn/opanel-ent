@@ -98,7 +98,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 		return
 	}
-	writeJSON(w, http.StatusOK, viewUser(u))
+	out := map[string]any{
+		"id": u.ID, "username": u.Username, "email": u.Email,
+		"role": u.Role, "totp_enabled": u.TOTPEnabled,
+	}
+	// The interface has to be able to say whose account this is and whose it
+	// is not, on every page, or an operator will forget which one they are
+	// looking at and act on the wrong account.
+	if id := impersonatorFrom(r.Context()); id != 0 {
+		out["impersonated"] = true
+		if op, err := s.db.UserByID(r.Context(), id); err == nil {
+			out["impersonated_by"] = op.Username
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // audit records an action. Failures to write the trail are logged but never
@@ -122,6 +135,16 @@ func (s *Server) audit(r *http.Request, action, target string, ok bool, detail s
 	if t := tokenFrom(r.Context()); t != nil {
 		e.ActorType = "token"
 		e.ActorName = t.Name
+	}
+	// An action taken while signed in as a customer belongs to the customer
+	// as far as permissions go, but the trail has to name the hand on the
+	// keyboard -- otherwise a destructive change made by staff reads as
+	// something the account holder did to themselves.
+	if id := impersonatorFrom(r.Context()); id != 0 {
+		e.ActorType = "impersonation"
+		if op, err := s.db.UserByID(r.Context(), id); err == nil {
+			e.ActorName = e.ActorName + " (as driven by " + op.Username + ")"
+		}
 	}
 	if err := s.db.AppendAudit(r.Context(), e); err != nil {
 		s.log.Warn("httpapi: append audit", "err", err, "action", action)

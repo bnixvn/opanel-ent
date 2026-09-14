@@ -10,10 +10,11 @@ import (
 // CreateSession stores a session keyed by the hash of its cookie value.
 func (d *DB) CreateSession(ctx context.Context, s *Session) error {
 	_, err := d.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at, ip, user_agent)
-		 VALUES (?,?,?,?,?,?,?)`,
+		`INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at,
+			ip, user_agent, impersonator_id)
+		 VALUES (?,?,?,?,?,?,?,?)`,
 		s.ID, s.UserID, fmtTime(s.CreatedAt), fmtTime(s.ExpiresAt),
-		fmtTime(s.LastSeenAt), s.IP, s.UserAgent)
+		fmtTime(s.LastSeenAt), s.IP, s.UserAgent, s.ImpersonatorID)
 	return err
 }
 
@@ -22,9 +23,11 @@ func (d *DB) SessionByID(ctx context.Context, id string) (*Session, error) {
 	var s Session
 	var created, expires, seen string
 	err := d.QueryRowContext(ctx,
-		`SELECT id, user_id, created_at, expires_at, last_seen_at, ip, user_agent
+		`SELECT id, user_id, created_at, expires_at, last_seen_at, ip, user_agent,
+			impersonator_id
 		 FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.UserID, &created, &expires, &seen, &s.IP, &s.UserAgent)
+	).Scan(&s.ID, &s.UserID, &created, &expires, &seen, &s.IP, &s.UserAgent,
+		&s.ImpersonatorID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
