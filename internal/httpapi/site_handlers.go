@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -332,9 +333,16 @@ func (s *Server) handleSiteCertificate(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// The address the certificate authority will send expiry warnings to.
+	// The owner's, unless the operator named one, so the warning reaches
+	// whoever can act on it.
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = s.acmeContact(r, site.OwnerID)
+	}
 	updated, err := s.sites.IssueCertificate(r.Context(), sites.CertificateRequest{
 		SiteID:         site.ID,
-		Email:          req.Email,
+		Email:          email,
 		IncludeAliases: req.IncludeAliases,
 		ForceHTTPS:     req.ForceHTTPS,
 		Staging:        req.Staging,

@@ -69,7 +69,7 @@ func (s *Server) handleSiteCertificateWildcard(w http.ResponseWriter, r *http.Re
 	cert, err := agentclient.Call[acme.Certificate](r.Context(), s.agent, "cert.wildcard", 1,
 		actions.CertWildcardRequest{
 			Domain: base, CFToken: req.CFToken,
-			Email: s.cfg.ACMEEmail, Staging: req.Staging,
+			Email: s.acmeContact(r, site.OwnerID), Staging: req.Staging,
 		})
 	if err != nil {
 		s.audit(r, "cert.wildcard", base, false, err.Error())

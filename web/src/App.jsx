@@ -195,7 +195,7 @@ export default function App() {
             <Route path="/backups" element={<Backups me={me} />} />
             <Route path="/ssl" element={<Ssl me={me} />} />
             <Route path="/logs" element={<Logs />} />
-            <Route path="/account" element={<Account me={me} />} />
+            <Route path="/account" element={<Account me={me} onChanged={setMe} />} />
             {(role === 'admin' || role === 'reseller') && (
               <>
                 <Route

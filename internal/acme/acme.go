@@ -12,7 +12,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -200,16 +202,45 @@ func (a *account) GetEmail() string                        { return a.Email }
 func (a *account) GetRegistration() *registration.Resource { return a.Registration }
 func (a *account) GetPrivateKey() crypto.PrivateKey        { return a.key }
 
+// accountDir is where this manager's ACME account lives.
+//
+// Split two ways, and both splits are load-bearing.
+//
+// By directory, because an account registered with the production CA does
+// not exist at the staging one: reusing the key there fails with "KeyID
+// header contained an invalid account URL", which turns staging -- the safe
+// way to test an issuance -- into the one thing that cannot work on a host
+// that has already issued a real certificate.
+//
+// By contact, because Let's Encrypt sends the expiry warning to the account,
+// not to the order. One shared account would send every customer's warning
+// to whoever registered first, which is nobody useful. An account per
+// contact is a handful of accounts on a busy host and is well inside the
+// registration rate limit.
+func (m *Manager) accountDir() string {
+	env := "production"
+	if strings.Contains(m.CADirURL, "staging") {
+		env = "staging"
+	}
+	bucket := "no-contact"
+	if m.Email != "" {
+		sum := sha256.Sum256([]byte(strings.ToLower(m.Email)))
+		bucket = hex.EncodeToString(sum[:8])
+	}
+	return filepath.Join(m.StateDir, env, bucket)
+}
+
 // loadOrRegister returns the ACME account, creating its key on first use.
 //
-// The account is reused across every certificate on the host. Registering a
-// new account per certificate would work but burns a rate limit that exists
-// precisely to discourage it.
+// The account is reused across every certificate with the same contact.
+// Registering a new one per certificate would work but burns a rate limit
+// that exists precisely to discourage it.
 func (m *Manager) loadOrRegister() (*account, error) {
-	if err := os.MkdirAll(m.StateDir, 0o700); err != nil {
+	dir := m.accountDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("acme: create state directory: %w", err)
 	}
-	keyPath := filepath.Join(m.StateDir, accountKey)
+	keyPath := filepath.Join(dir, accountKey)
 
 	var key *ecdsa.PrivateKey
 	data, err := os.ReadFile(keyPath)
@@ -239,7 +270,7 @@ func (m *Manager) loadOrRegister() (*account, error) {
 	}
 
 	acct := &account{Email: m.Email, key: key}
-	if raw, err := os.ReadFile(filepath.Join(m.StateDir, accountRecord)); err == nil {
+	if raw, err := os.ReadFile(filepath.Join(dir, accountRecord)); err == nil {
 		var reg registration.Resource
 		if json.Unmarshal(raw, &reg) == nil && reg.URI != "" {
 			acct.Registration = &reg
@@ -253,7 +284,7 @@ func (m *Manager) saveRegistration(reg *registration.Resource) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(m.StateDir, accountRecord), raw, 0o600)
+	return os.WriteFile(filepath.Join(m.accountDir(), accountRecord), raw, 0o600)
 }
 
 func expiryOf(pemBytes []byte) (time.Time, error) {

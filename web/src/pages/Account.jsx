@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Card, Message, Secret, Tag, useMessage } from '../components.jsx';
 
-export default function Account({ me }) {
+export default function Account({ me, onChanged }) {
+  const [email, setEmail] = useState(me.email || '');
+  const [emailPassword, setEmailPassword] = useState('');
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [totp, setTotp] = useState(null);
@@ -23,9 +25,60 @@ export default function Account({ me }) {
         <dl className="kv">
           <dt>Username</dt><dd>{me.username}</dd>
           <dt>Role</dt><dd>{me.role}</dd>
+          <dt>Email</dt><dd>{me.email || <span className="muted">not set</span>}</dd>
           <dt>Two-factor</dt>
           <dd>{me.totp_enabled ? <Tag kind="ok">on</Tag> : <Tag>off</Tag>}</dd>
         </dl>
+      </Card>
+
+      <Card title="Contact email">
+        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+          Where the certificate authority sends the warning before one of your
+          certificates expires. Changing it needs your password, because
+          somebody who could change it from an unlocked browser could take the
+          account over quietly.
+        </p>
+        <form
+          className="row"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            msg.clear();
+            try {
+              const res = await api.post('/auth/email', {
+                email: email.trim(), password: emailPassword,
+              });
+              msg.ok(res.email ? `Email set to ${res.email}` : 'Email cleared');
+              setEmailPassword('');
+              if (onChanged) onChanged({ ...me, email: res.email });
+            } catch (err) {
+              msg.fail(err);
+            }
+          }}
+        >
+          <div className="field">
+            <label htmlFor="acctEmail">Email</label>
+            <input
+              id="acctEmail"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="acctEmailPw">Your password</label>
+            <input
+              id="acctEmailPw"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={emailPassword}
+              onChange={(e) => setEmailPassword(e.target.value)}
+            />
+          </div>
+          <div><button type="submit" className="primary">Save email</button></div>
+        </form>
       </Card>
 
       <Card title="Change your password">

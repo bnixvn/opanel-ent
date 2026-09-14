@@ -146,6 +146,7 @@ func (s *Server) routes() http.Handler {
 			pr.Group(func(own chi.Router) {
 				own.Use(s.refuseWhileImpersonating)
 				own.Post("/auth/password", s.handleChangeOwnPassword)
+				own.Post("/auth/email", s.handleChangeOwnEmail)
 				own.Post("/auth/2fa/setup", s.handleTOTPSetup)
 				own.Post("/auth/2fa/enable", s.handleTOTPEnable)
 				own.Post("/auth/2fa/disable", s.handleTOTPDisable)

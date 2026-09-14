@@ -422,9 +422,16 @@ func (s *Service) RenewDueCertificates(ctx context.Context, email string) (renew
 		return 0, []error{err}
 	}
 	for _, site := range due {
+		// The owner's own address, so the warning the certificate authority
+		// sends before expiry lands with somebody who can fix the domain.
+		// The configured address is the fallback, not the default.
+		contact := email
+		if owner, err := s.db.UserByID(ctx, site.OwnerID); err == nil && owner.Email != "" {
+			contact = owner.Email
+		}
 		if _, err := s.IssueCertificate(ctx, CertificateRequest{
 			SiteID:     site.ID,
-			Email:      email,
+			Email:      contact,
 			ForceHTTPS: site.ForceHTTPS,
 		}); err != nil {
 			s.log.Error("sites: certificate renewal failed",
