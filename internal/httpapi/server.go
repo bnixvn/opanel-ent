@@ -183,6 +183,10 @@ func (s *Server) routes() http.Handler {
 			// visitors' addresses and the paths they asked for.
 			pr.Get("/logs", s.handleLogTail)
 			pr.Get("/logs/download", s.handleLogDownload)
+			pr.Get("/cron", s.handleCronList)
+			pr.Post("/cron", s.handleCronCreate)
+			pr.Patch("/cron/{id}", s.handleCronUpdate)
+			pr.Delete("/cron/{id}", s.handleCronDelete)
 			pr.Get("/malware", s.handleMalwareStatus)
 			pr.Post("/malware/scan", s.handleMalwareScan)
 			pr.Get("/malware/scans/{id}", s.handleMalwareScanGet)

@@ -6,6 +6,7 @@ import Sites from './pages/Sites.jsx';
 import Databases from './pages/Databases.jsx';
 import WordPress from './pages/WordPress.jsx';
 import Malware from './pages/Malware.jsx';
+import Cron from './pages/Cron.jsx';
 import Files from './pages/Files.jsx';
 import Backups from './pages/Backups.jsx';
 import Ssl from './pages/Ssl.jsx';
@@ -29,6 +30,7 @@ const MENU = [
     { to: '/files', label: 'File manager' },
     { to: '/backups', label: 'Backups' },
     { to: '/ssl', label: 'SSL' },
+    { to: '/cron', label: 'Cron' },
     { to: '/logs', label: 'Logs' },
   ] },
   { group: 'Security', items: [
@@ -197,6 +199,7 @@ export default function App() {
             <Route path="/databases" element={<Databases me={me} />} />
             <Route path="/wordpress" element={<WordPress me={me} />} />
             <Route path="/security/malware" element={<Malware me={me} />} />
+            <Route path="/cron" element={<Cron me={me} />} />
             <Route path="/files" element={<Files me={me} />} />
             <Route path="/backups" element={<Backups me={me} />} />
             <Route path="/ssl" element={<Ssl me={me} />} />
