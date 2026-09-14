@@ -165,6 +165,11 @@ func registerClamAV(r *agent.Registry) {
 			return clamStatus(), nil
 		})
 
+	agent.RegisterSlow(r, "clam.remove", 1, ClamUpdateBudget,
+		func(ctx context.Context, in ClamRemoveRequest) (ClamRemoveResult, error) {
+			return removeClamAV(ctx, in)
+		})
+
 	agent.RegisterSlow(r, "clam.update", 1, ClamUpdateBudget,
 		func(ctx context.Context, _ struct{}) (ClamAVStatus, error) {
 			if err := updateSignatures(ctx); err != nil {
@@ -259,6 +264,72 @@ func availableMemoryMB() int {
 		return kb / 1024
 	}
 	return 0
+}
+
+// ClamRemoveRequest asks for the scanner to be taken off the server.
+type ClamRemoveRequest struct {
+	// DropQuarantine also deletes the quarantine directory.
+	//
+	// Off unless asked for, and asked for separately from the removal. What
+	// is in there is the customer's own files -- a plugin that tripped a
+	// signature is still their plugin, and a false positive is still their
+	// site's code. Removing the scanner is a decision about software;
+	// deleting what it took is a decision about somebody else's data.
+	DropQuarantine bool `json:"drop_quarantine"`
+}
+
+// Validate accepts anything: both fields are booleans.
+func (r *ClamRemoveRequest) Validate() error { return nil }
+
+// ClamRemoveResult reports what was left behind.
+type ClamRemoveResult struct {
+	Status ClamAVStatus `json:"status"`
+	// QuarantineKept is how many files are still in quarantine, and where.
+	QuarantineKept int    `json:"quarantine_kept"`
+	QuarantineDir  string `json:"quarantine_dir,omitempty"`
+}
+
+// removeClamAV takes the scanner off the server.
+//
+// The signature database goes with it, which is the point: it is a few
+// hundred megabytes that a server not scanning anything has no use for, and
+// leaving freshclam behind to keep downloading it would be the one part of
+// ClamAV that carried on running after it was removed.
+func removeClamAV(ctx context.Context, in ClamRemoveRequest) (ClamRemoveResult, error) {
+	// The updater first. Removing the package while its timer is due to fire
+	// leaves a failing unit behind for the operator to find later.
+	for _, unit := range []string{"clamav-freshclam.service", "clamav-freshclam.timer"} {
+		_, _ = run.Cmd(ctx, []string{"systemctl", "disable", "--now", unit},
+			run.Timeout(60*time.Second))
+	}
+
+	if err := pkgmgr.Remove(ctx, "clamav", "clamav-freshclam"); err != nil {
+		return ClamRemoveResult{}, fmt.Errorf("remove clamav: %w", err)
+	}
+	// The database is the package's data, not its files, so rpm leaves it.
+	if err := os.RemoveAll("/var/lib/clamav"); err != nil && !os.IsNotExist(err) {
+		return ClamRemoveResult{}, fmt.Errorf("remove the signature database: %w", err)
+	}
+
+	out := ClamRemoveResult{QuarantineDir: QuarantineDir}
+	if in.DropQuarantine {
+		if err := os.RemoveAll(QuarantineDir); err != nil && !os.IsNotExist(err) {
+			return out, fmt.Errorf("remove the quarantine: %w", err)
+		}
+		out.QuarantineDir = ""
+	} else {
+		entries, err := os.ReadDir(QuarantineDir)
+		if err == nil {
+			out.QuarantineKept = len(entries)
+		}
+		if out.QuarantineKept == 0 {
+			// An empty quarantine is not worth keeping or mentioning.
+			_ = os.Remove(QuarantineDir)
+			out.QuarantineDir = ""
+		}
+	}
+	out.Status = clamStatus()
+	return out, nil
 }
 
 // installClamAV adds the scanner and the updater, but not the daemon.

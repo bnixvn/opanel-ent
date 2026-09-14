@@ -313,6 +313,7 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/sites/{id}/waf", s.handleSiteWAF)
 
 				ar.Post("/malware/install", s.handleMalwareInstall)
+				ar.Delete("/malware/install", s.handleMalwareRemove)
 				ar.Post("/malware/update", s.handleMalwareUpdate)
 				ar.Post("/phpmyadmin/install", s.handlePMAInstall)
 				ar.Get("/certificates", s.handleCertList)
