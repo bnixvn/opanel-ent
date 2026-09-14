@@ -16,41 +16,34 @@ permissions:
   contents: read
 
 jobs:
-  python-deps:
-    name: Python dependencies (pip-audit)
+  go-deps:
+    name: Go dependencies (govulncheck)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
-      - uses: pypa/gh-action-pip-audit@v1.1.0
-        with:
-          inputs: backend/requirements.txt
-          # Accepted risk, re-review whenever this list is touched:
-          #
-          # GHSA-wj6h-64fc-37mp (CVE-2024-23342) -- Minerva timing attack on
-          # P-256 in python-ecdsa. No fixed version exists; upstream declined
-          # to fix and documents ecdsa as unsuitable for untrusted input.
-          # ecdsa reaches us only as a transitive dependency of python-jose,
-          # and opanel-ent signs its JWTs with HS256 (app/core/security.py), so
-          # no ECDSA code path is exercised. Removing it for good means
-          # dropping python-jose for PyJWT.
-          ignore-vulns: |
-            GHSA-wj6h-64fc-37mp
+          go-version: '1.26'
+          cache: true
+      # Reachability-based: it reports a vulnerable function this code can
+      # actually call, rather than every advisory against everything in
+      # go.sum. That is the difference between a list somebody reads and a
+      # list somebody learns to ignore.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   node-deps:
-    name: Frontend dependencies (npm audit)
+    name: Panel frontend dependencies (npm audit)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - name: npm audit
         run: npm audit --audit-level=high

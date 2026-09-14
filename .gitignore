@@ -1,15 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-.venv/
-venv/
-env/
+# Databases
 *.db
 *.sqlite
 *.sqlite3
-.pytest_cache/
 
 # Node
 node_modules/
@@ -40,13 +32,6 @@ Thumbs.db
 *.tar.gz
 backup/
 
-# BPanel runtime
-backend/bpanel.db
-
-# Landing page
-landing.html
-/style.css
-
 # Dev / CI / tooling (not part of release)
 .codex/
 .github/
@@ -58,22 +43,6 @@ landing.html
 .vendor/
 skills/
 prompts/
-
-# Scripts not part of setup
-check.py
-patch*.py
-do_patch.py
-fix_include.py
-remote_fix.py
-test_ssh.py
-setup.sh
-change_IP.sh
-
-# Test files
-backend/tests/
-
-# Misc
-images.zip
 
 # Codebase memory
 .codebase-memory/

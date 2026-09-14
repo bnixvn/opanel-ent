@@ -1,11 +1,9 @@
+# Go is checked by golangci-lint in CI rather than here: it needs the whole
+# module to say anything useful, which is slower than a commit hook should
+# be. What is left are the checks that are cheap and catch things review
+# does not — a private key pasted into a file, a 40 MB binary, a YAML that
+# does not parse.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -17,9 +15,10 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1024]
 
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
+  - repo: local
     hooks:
-      - id: bandit
-        args: ["-ll", "-q"]
-        files: ^backend/app/
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -l -w
+        language: system
+        types: [go]

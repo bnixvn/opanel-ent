@@ -1,4 +1,4 @@
-# OPanel v2 build
+# OPanel Enterprise build
 #
 # CGO_ENABLED=0 is not optional: it is what produces a single static binary
 # with no libc or Python dependency, which is the whole reason the panel can
@@ -16,7 +16,7 @@ DIST      ?= dist
 
 export CGO_ENABLED = 0
 
-.PHONY: all build linux test lint vet fmt tidy clean check
+.PHONY: all build web linux test lint vet fmt tidy clean check
 
 all: check build
 
@@ -25,6 +25,12 @@ build: $(BINARIES:%=$(DIST)/%)
 $(DIST)/%:
 	@mkdir -p $(DIST)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/$*
+
+# The interface. Its build output lands in internal/httpapi/web, which is
+# committed, so `go build` works on a clone that has never seen npm -- the
+# binary embeds that directory and there is no second artifact to ship.
+web:
+	cd web && npm ci && npm run build
 
 # Cross-compile for the target host from any workstation.
 linux:
