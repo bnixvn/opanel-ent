@@ -17,21 +17,28 @@ type Plan struct {
 	MaxDatabases int
 	DiskQuotaMB  int
 	DefaultPHP   string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// OwnerID is the reseller who created the package; nil means a system
+	// package, which every reseller may assign.
+	OwnerID   *int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// Users is filled by listings, so an operator can see what a package
 	// affects before changing it.
 	Users int
 }
 
 const planCols = `id, name, description, max_sites, max_databases, disk_quota_mb,
-	default_php, created_at, updated_at`
+	default_php, owner_id, created_at, updated_at`
 
 func scanPlan(row interface{ Scan(...any) error }) (*Plan, error) {
 	var p Plan
 	var created, updated string
+	var owner sql.NullInt64
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.MaxSites, &p.MaxDatabases,
-		&p.DiskQuotaMB, &p.DefaultPHP, &created, &updated)
+		&p.DiskQuotaMB, &p.DefaultPHP, &owner, &created, &updated)
+	if owner.Valid {
+		p.OwnerID = &owner.Int64
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -52,9 +59,9 @@ func (d *DB) CreatePlan(ctx context.Context, p *Plan) (*Plan, error) {
 	now := time.Now().UTC()
 	res, err := d.ExecContext(ctx,
 		`INSERT INTO plans (name, description, max_sites, max_databases, disk_quota_mb,
-			default_php, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+			default_php, owner_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.Description, p.MaxSites, p.MaxDatabases, p.DiskQuotaMB,
-		p.DefaultPHP, fmtTime(now), fmtTime(now))
+		p.DefaultPHP, p.OwnerID, fmtTime(now), fmtTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("db: create plan %q: %w", p.Name, err)
 	}
@@ -71,8 +78,17 @@ func (d *DB) PlanByID(ctx context.Context, id int64) (*Plan, error) {
 }
 
 // ListPlans returns every package with the number of accounts on it.
-func (d *DB) ListPlans(ctx context.Context) ([]*Plan, error) {
-	rows, err := d.QueryContext(ctx, `SELECT `+planCols+` FROM plans ORDER BY name`)
+// ListPlans returns the packages a caller may assign: the system packages
+// plus, for a reseller, their own.
+func (d *DB) ListPlans(ctx context.Context, scope Scope) ([]*Plan, error) {
+	q := `SELECT ` + planCols + ` FROM plans WHERE owner_id IS NULL`
+	var args []any
+	if !scope.Everything {
+		q += ` OR owner_id = ?`
+		args = append(args, scope.SelfID)
+	}
+	q += ` ORDER BY name`
+	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

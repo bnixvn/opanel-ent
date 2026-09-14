@@ -42,6 +42,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, resp)
 }
 
+// handleQuotaStatus reports whether the filesystem is enforcing quotas.
+//
+// Read by every authenticated user, because the answer changes what the disk
+// figure on their own usage panel means.
+func (s *Server) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.plans.QuotaStatus(r.Context())
+	if err != nil {
+		s.log.Warn("httpapi: cannot read quota status", "err", err)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enforced": false, "error": "the agent could not be reached",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	info, err := agentclient.Call[actions.SysInfoResult](r.Context(), s.agent, "sysinfo", 1, struct{}{})
 	if err != nil {

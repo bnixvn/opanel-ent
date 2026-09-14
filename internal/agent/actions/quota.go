@@ -57,3 +57,18 @@ func registerQuota(r *agent.Registry) {
 		return DiskUsageResult{Username: in.Username, Bytes: n}, nil
 	})
 }
+
+// duBytes measures a directory the slow way. Still needed as the fallback for
+// a host where project quota has been configured but not yet rebooted into.
+func duBytes(ctx context.Context, path string) (int64, error) {
+	res, err := run.Cmd(ctx, []string{"du", "-sb", "--", path},
+		run.Timeout(2*time.Minute), run.AllowExit(1))
+	if err != nil {
+		return 0, fmt.Errorf("measure %s: %w", path, err)
+	}
+	fields := strings.Fields(res.Stdout)
+	if len(fields) == 0 {
+		return 0, nil
+	}
+	return strconv.ParseInt(fields[0], 10, 64)
+}

@@ -40,7 +40,7 @@ func (s *Server) viewPanelUser(r *http.Request, u *db.User) panelUserView {
 }
 
 func (s *Server) handleUserList(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.ListUsers(r.Context())
+	rows, err := s.db.ListUsers(r.Context(), auth.ScopeFor(userFrom(r.Context())))
 	if err != nil {
 		s.log.Error("httpapi: list users", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -58,6 +58,11 @@ type createUserRequest struct {
 	Email    string `json:"email,omitempty"`
 	Role     string `json:"role"`
 	Password string `json:"password,omitempty"`
+	// PlanID assigns a package at creation, which is also what the
+	// reseller allowance is measured against.
+	PlanID *int64 `json:"plan_id,omitempty"`
+	// ParentID lets an administrator hand the account to a reseller.
+	ParentID int64 `json:"parent_id,omitempty"`
 }
 
 func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +79,51 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A customer a reseller creates belongs to that reseller. An
+	// administrator may hand the account to a reseller explicitly, and
+	// creates it for the server itself when they do not.
+	parentID := req.ParentID
+	if auth.Role(actor.Role) == auth.RoleReseller {
+		parentID = actor.ID
+	}
+
+	// The allowance is checked against the package being assigned, so a
+	// reseller cannot sell 10 GB packages past the total they were given.
+	planDisk := 0
+	if req.PlanID != nil {
+		plan, err := s.db.PlanByID(r.Context(), *req.PlanID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "no such package")
+			return
+		}
+		planDisk = plan.DiskQuotaMB
+	}
+	if err := s.users.CheckCanCreateAccount(r.Context(), actor, planDisk); err != nil {
+		s.audit(r, "user.create", req.Username, false, err.Error())
+		writeError(w, http.StatusConflict, "allocation_exceeded", err.Error())
+		return
+	}
+
 	res, err := s.users.Create(r.Context(), panelusers.CreateRequest{
-		Username: req.Username, Email: req.Email, Role: role, Password: req.Password,
+		Username: req.Username, Email: req.Email, Role: role,
+		Password: req.Password, ParentID: parentID,
 	})
 	if err != nil {
 		s.audit(r, "user.create", req.Username, false, err.Error())
 		s.userError(w, err)
 		return
+	}
+	if req.PlanID != nil {
+		if err := s.db.SetUserPlan(r.Context(), res.User.ID, req.PlanID); err != nil {
+			s.log.Error("httpapi: assign package to new user", "err", err)
+		}
+	}
+	// The filesystem limit goes on straight away. An account created with a
+	// package and no quota behind it can fill the disk before anybody
+	// notices the two were never connected.
+	if err := s.plans.ApplyQuota(r.Context(), res.User); err != nil {
+		s.log.Warn("httpapi: could not apply the disk quota for a new account",
+			"user", res.User.Username, "err", err)
 	}
 	s.audit(r, "user.create", res.User.Username, true, string(role))
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -106,7 +149,25 @@ func (s *Server) loadPanelUser(w http.ResponseWriter, r *http.Request) *db.User 
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return nil
 	}
+	// Not found rather than forbidden: telling a reseller that a username
+	// they guessed exists on the server is itself a leak.
+	if !auth.CanSee(userFrom(r.Context()), u) {
+		writeError(w, http.StatusNotFound, "not_found", "no such user")
+		return nil
+	}
 	return u
+}
+
+// requireManage refuses a change the caller may see but not make. A reseller
+// may manage their own end users and nobody else -- not another reseller's
+// customer, not another reseller, and not an administrator.
+func (s *Server) requireManage(w http.ResponseWriter, r *http.Request, target *db.User) bool {
+	if auth.CanManage(userFrom(r.Context()), target) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "forbidden",
+		"that account is not yours to manage")
+	return false
 }
 
 type updateUserRequest struct {
@@ -125,6 +186,9 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := userFrom(r.Context())
+	if !s.requireManage(w, r, target) {
+		return
+	}
 
 	if req.Suspended != nil {
 		// Suspending yourself ends your own session mid-request and leaves
@@ -182,6 +246,9 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	actor := userFrom(r.Context())
 	if target.ID == actor.ID {
 		writeError(w, http.StatusBadRequest, "bad_request", "you cannot delete your own account")
+		return
+	}
+	if !s.requireManage(w, r, target) {
 		return
 	}
 	removeFiles := r.URL.Query().Get("remove_files") == "true"

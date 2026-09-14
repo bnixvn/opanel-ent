@@ -15,6 +15,7 @@ type Database struct {
 	OwnerID       int64
 	CreatedAt     time.Time
 	OwnerUsername string
+	OwnerParentID int64
 	// Users is filled by listings that resolve grants.
 	Users []string
 	// SizeBytes is filled by listings that ask the server; it is not stored.
@@ -28,6 +29,7 @@ type DBUser struct {
 	OwnerID       int64
 	CreatedAt     time.Time
 	OwnerUsername string
+	OwnerParentID int64
 	// Databases is filled by listings that resolve grants.
 	Databases []string
 }
@@ -48,12 +50,12 @@ func (d *DB) CreateDatabaseRecord(ctx context.Context, name string, ownerID int6
 	return d.DatabaseByID(ctx, id)
 }
 
-const dbCols = `d.id, d.name, d.owner_id, d.created_at, u.username`
+const dbCols = `d.id, d.name, d.owner_id, d.created_at, u.username, COALESCE(u.parent_id, 0)`
 
 func scanDatabase(row interface{ Scan(...any) error }) (*Database, error) {
 	var x Database
 	var created string
-	err := row.Scan(&x.ID, &x.Name, &x.OwnerID, &created, &x.OwnerUsername)
+	err := row.Scan(&x.ID, &x.Name, &x.OwnerID, &created, &x.OwnerUsername, &x.OwnerParentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -79,14 +81,10 @@ func (d *DB) DatabaseByName(ctx context.Context, name string) (*Database, error)
 }
 
 // ListDatabases returns databases ordered by name. ownerID 0 means all.
-func (d *DB) ListDatabases(ctx context.Context, ownerID int64) ([]*Database, error) {
-	q := `SELECT ` + dbCols + ` FROM db_databases d JOIN users u ON u.id = d.owner_id`
-	var args []any
-	if ownerID != 0 {
-		q += ` WHERE d.owner_id = ?`
-		args = append(args, ownerID)
-	}
-	q += ` ORDER BY d.name`
+func (d *DB) ListDatabases(ctx context.Context, scope Scope) ([]*Database, error) {
+	where, args := scope.Where("d.owner_id", "u.parent_id")
+	q := `SELECT ` + dbCols + ` FROM db_databases d JOIN users u ON u.id = d.owner_id` +
+		` WHERE ` + where + ` ORDER BY d.name`
 
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -158,12 +156,12 @@ func (d *DB) CreateDBUserRecord(ctx context.Context, username string, ownerID in
 	return d.DBUserByID(ctx, id)
 }
 
-const dbUserCols = `x.id, x.username, x.owner_id, x.created_at, u.username`
+const dbUserCols = `x.id, x.username, x.owner_id, x.created_at, u.username, COALESCE(u.parent_id, 0)`
 
 func scanDBUser(row interface{ Scan(...any) error }) (*DBUser, error) {
 	var x DBUser
 	var created string
-	err := row.Scan(&x.ID, &x.Username, &x.OwnerID, &created, &x.OwnerUsername)
+	err := row.Scan(&x.ID, &x.Username, &x.OwnerID, &created, &x.OwnerUsername, &x.OwnerParentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -188,15 +186,11 @@ func (d *DB) DBUserByName(ctx context.Context, username string) (*DBUser, error)
 		`SELECT `+dbUserCols+` FROM db_users x JOIN users u ON u.id = x.owner_id WHERE x.username = ?`, username))
 }
 
-// ListDBUsers returns accounts ordered by name. ownerID 0 means all.
-func (d *DB) ListDBUsers(ctx context.Context, ownerID int64) ([]*DBUser, error) {
-	q := `SELECT ` + dbUserCols + ` FROM db_users x JOIN users u ON u.id = x.owner_id`
-	var args []any
-	if ownerID != 0 {
-		q += ` WHERE x.owner_id = ?`
-		args = append(args, ownerID)
-	}
-	q += ` ORDER BY x.username`
+// ListDBUsers returns accounts ordered by name, restricted to the scope.
+func (d *DB) ListDBUsers(ctx context.Context, scope Scope) ([]*DBUser, error) {
+	where, args := scope.Where("x.owner_id", "u.parent_id")
+	q := `SELECT ` + dbUserCols + ` FROM db_users x JOIN users u ON u.id = x.owner_id` +
+		` WHERE ` + where + ` ORDER BY x.username`
 
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {

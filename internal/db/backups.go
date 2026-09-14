@@ -39,13 +39,15 @@ type Backup struct {
 	CreatedAt  time.Time
 	FinishedAt time.Time
 
-	// OwnerUsername is filled by queries that join users; it is not stored.
+	// OwnerUsername and OwnerParentID are filled by the join; neither is
+	// stored on the backup row.
 	OwnerUsername string
+	OwnerParentID int64
 }
 
 const backupCols = `b.id, b.owner_id, b.filename, b.kind, b.status, b.error,
 	b.size_bytes, b.file_count, b.databases, b.has_files, b.sha256,
-	b.created_at, b.finished_at, u.username`
+	b.created_at, b.finished_at, u.username, COALESCE(u.parent_id, 0)`
 
 const backupJoin = ` FROM backups b JOIN users u ON u.id = b.owner_id`
 
@@ -54,7 +56,7 @@ func scanBackup(row interface{ Scan(...any) error }) (*Backup, error) {
 	var dbs, created, finished string
 	err := row.Scan(&b.ID, &b.OwnerID, &b.Filename, &b.Kind, &b.Status, &b.Error,
 		&b.SizeBytes, &b.FileCount, &dbs, &b.HasFiles, &b.SHA256,
-		&created, &finished, &b.OwnerUsername)
+		&created, &finished, &b.OwnerUsername, &b.OwnerParentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -97,15 +99,11 @@ func (d *DB) BackupByID(ctx context.Context, id int64) (*Backup, error) {
 	return scanBackup(d.QueryRowContext(ctx, `SELECT `+backupCols+backupJoin+` WHERE b.id = ?`, id))
 }
 
-// ListBackups returns backups newest first. An ownerID of 0 means every owner.
-func (d *DB) ListBackups(ctx context.Context, ownerID int64) ([]*Backup, error) {
-	q := `SELECT ` + backupCols + backupJoin
-	var args []any
-	if ownerID != 0 {
-		q += ` WHERE b.owner_id = ?`
-		args = append(args, ownerID)
-	}
-	q += ` ORDER BY b.created_at DESC, b.id DESC`
+// ListBackups returns backups newest first, restricted to the scope.
+func (d *DB) ListBackups(ctx context.Context, scope Scope) ([]*Backup, error) {
+	where, args := scope.Where("b.owner_id", "u.parent_id")
+	q := `SELECT ` + backupCols + backupJoin + ` WHERE ` + where +
+		` ORDER BY b.created_at DESC, b.id DESC`
 
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {

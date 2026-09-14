@@ -30,14 +30,16 @@ type Site struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 
-	// OwnerUsername is filled by queries that join users. It is not stored.
+	// OwnerUsername and OwnerParentID are filled by queries that join users.
+	// Neither is stored on the site row.
 	OwnerUsername string
+	OwnerParentID int64
 }
 
 const siteCols = `s.id, s.domain, s.owner_id, s.app_type, s.php_version, s.document_root,
 	s.aliases, s.rewrite_mode, s.ssl_enabled, s.cert_file, s.key_file,
 	s.cert_expires_at, s.force_https, s.waf_enabled, s.suspended,
-	s.created_at, s.updated_at, u.username`
+	s.created_at, s.updated_at, u.username, COALESCE(u.parent_id, 0)`
 
 func scanSite(row interface{ Scan(...any) error }) (*Site, error) {
 	var s Site
@@ -45,7 +47,7 @@ func scanSite(row interface{ Scan(...any) error }) (*Site, error) {
 	err := row.Scan(&s.ID, &s.Domain, &s.OwnerID, &s.AppType, &s.PHPVersion, &s.DocumentRoot,
 		&aliases, &s.RewriteMode, &s.SSLEnabled, &s.CertFile, &s.KeyFile,
 		&certExpires, &s.ForceHTTPS, &s.WAFEnabled, &s.Suspended,
-		&created, &updated, &s.OwnerUsername)
+		&created, &updated, &s.OwnerUsername, &s.OwnerParentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -101,16 +103,11 @@ func (d *DB) SiteByDomain(ctx context.Context, domain string) (*Site, error) {
 	return scanSite(d.QueryRowContext(ctx, `SELECT `+siteCols+siteJoin+` WHERE s.domain = ?`, domain))
 }
 
-// ListSites returns sites ordered by domain. An ownerID of 0 means every
-// owner; any other value restricts the result to that owner.
-func (d *DB) ListSites(ctx context.Context, ownerID int64) ([]*Site, error) {
-	q := `SELECT ` + siteCols + siteJoin
-	var args []any
-	if ownerID != 0 {
-		q += ` WHERE s.owner_id = ?`
-		args = append(args, ownerID)
-	}
-	q += ` ORDER BY s.domain`
+// ListSites returns sites ordered by domain, restricted to what the scope
+// allows.
+func (d *DB) ListSites(ctx context.Context, scope Scope) ([]*Site, error) {
+	where, args := scope.Where("s.owner_id", "u.parent_id")
+	q := `SELECT ` + siteCols + siteJoin + ` WHERE ` + where + ` ORDER BY s.domain`
 
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {

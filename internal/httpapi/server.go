@@ -124,6 +124,10 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/usage", s.handleUsage)
 			pr.Get("/users/{id}/usage", s.handleUsage)
 			pr.Get("/plans", s.handlePlanList)
+			// A reseller reads their own allowance here; an administrator
+			// reads anyone's with ?user=<id>.
+			pr.Get("/reseller", s.handleResellerSummary)
+			pr.Get("/quota/status", s.handleQuotaStatus)
 
 			// Files. The service resolves whose home is in play, so an end
 			// user reaches the same routes and can only ever see their own.
@@ -165,6 +169,9 @@ func (s *Server) routes() http.Handler {
 				rr.Post("/users/{id}/password", s.handleUserPassword)
 				rr.Post("/users/{id}/sftp-password", s.handleUserSFTPPassword)
 				rr.Post("/users/{id}/plan", s.handleUserPlanAssign)
+				rr.Post("/plans", s.handlePlanCreate)
+				rr.Patch("/plans/{id}", s.handlePlanUpdate)
+				rr.Delete("/plans/{id}", s.handlePlanDelete)
 			})
 
 			pr.Group(func(ar chi.Router) {
@@ -176,9 +183,8 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
-				ar.Post("/plans", s.handlePlanCreate)
-				ar.Patch("/plans/{id}", s.handlePlanUpdate)
-				ar.Delete("/plans/{id}", s.handlePlanDelete)
+				ar.Put("/users/{id}/reseller-limits", s.handleResellerLimitsSet)
+				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})
 		})
 	})

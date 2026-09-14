@@ -60,6 +60,7 @@ func allSteps() []Step {
 		{Name: "Create directories", Apply: stepDirectories},
 		{Name: "Install binaries", Apply: stepBinaries},
 		{Name: "Install systemd units", Apply: stepUnits},
+		{Name: "Enable disk quota", Check: checkProjectQuota, Apply: stepProjectQuota},
 		{Name: "Install WP-CLI", Check: checkWPCLI, Apply: stepWPCLI},
 		{Name: "Configure SFTP", Check: checkSFTP, Apply: stepSFTP},
 		{Name: "Configure firewall", Check: checkFirewall, Apply: stepFirewall},
@@ -138,6 +139,76 @@ func firstLineOf(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// checkProjectQuota reports whether the kernel argument is already in place.
+// It deliberately does not check whether quota is *active*: the step's job is
+// to configure the boot loader, and the reboot that makes it active is the
+// operator's to schedule.
+func checkProjectQuota(ctx context.Context, _ *Options) (bool, error) {
+	res, err := run.Cmd(ctx, []string{"grubby", "--info=DEFAULT"}, run.Timeout(30*time.Second))
+	if err != nil {
+		return false, nil // no grubby: the step will report why
+	}
+	return strings.Contains(res.Stdout, "pquota"), nil
+}
+
+// stepProjectQuota turns on XFS project quota for the filesystem the homes
+// live on.
+//
+// It does not reboot. A hosting panel that reboots the server during its own
+// installation, on a machine that may already be serving other things, is not
+// a panel anybody should trust; the operator is told instead, and the panel
+// reports quotas as unenforced until it sees them active.
+func stepProjectQuota(ctx context.Context, _ *Options) error {
+	fsType, opts, err := rootFilesystem(ctx)
+	if err != nil {
+		return err
+	}
+	if fsType != "xfs" {
+		return fmt.Errorf("hard quotas need XFS; %s is %s", actions.QuotaMount, fsType)
+	}
+	if strings.Contains(opts, "prjquota") {
+		return nil // already active, nothing to arrange
+	}
+
+	if _, ok := run.Look("grubby"); !ok {
+		return errors.New("grubby is not installed, so the kernel argument cannot be set")
+	}
+	if _, err := run.Cmd(ctx, []string{
+		"grubby", "--update-kernel=ALL", "--args=rootflags=pquota",
+	}, run.Timeout(time.Minute)); err != nil {
+		return fmt.Errorf("set the kernel argument: %w", err)
+	}
+	return nil
+}
+
+// rootFilesystem reports the type and mount options of the filesystem the
+// home directories are on.
+func rootFilesystem(ctx context.Context) (fsType, options string, err error) {
+	res, err := run.Cmd(ctx, []string{"findmnt", "-no", "FSTYPE,OPTIONS", actions.QuotaMount})
+	if err != nil {
+		return "", "", fmt.Errorf("inspect %s: %w", actions.QuotaMount, err)
+	}
+	fields := strings.Fields(res.Stdout)
+	if len(fields) < 2 {
+		return "", "", fmt.Errorf("cannot read the mount options of %s", actions.QuotaMount)
+	}
+	return fields[0], fields[1], nil
+}
+
+// QuotaNeedsReboot reports whether the kernel argument is set but not yet in
+// effect, which is what the installer prints and the panel shows as a banner.
+func QuotaNeedsReboot(ctx context.Context) bool {
+	_, opts, err := rootFilesystem(ctx)
+	if err != nil {
+		return false
+	}
+	if strings.Contains(opts, "prjquota") {
+		return false
+	}
+	armed, _ := checkProjectQuota(ctx, nil)
+	return armed
 }
 
 func checkFile(path string) func(context.Context, *Options) (bool, error) {

@@ -50,6 +50,9 @@ type CreateRequest struct {
 	Role     auth.Role
 	// Password is optional. When empty one is generated and returned.
 	Password string
+	// ParentID is the reseller the account belongs to, zero for an account
+	// that belongs to the server itself.
+	ParentID int64
 }
 
 // Result carries the created user plus any generated secret, which is shown
@@ -107,12 +110,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Result, error
 		return nil, err
 	}
 
-	user, err := s.db.CreateUser(ctx, &db.User{
+	newUser := &db.User{
 		Username:     username,
 		Email:        strings.TrimSpace(req.Email),
 		PasswordHash: hash,
 		Role:         string(req.Role),
-	})
+	}
+	if req.ParentID != 0 {
+		newUser.ParentID = &req.ParentID
+	}
+	user, err := s.db.CreateUser(ctx, newUser)
 	if err != nil {
 		return nil, err
 	}

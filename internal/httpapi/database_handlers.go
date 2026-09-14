@@ -66,7 +66,7 @@ func ownerFor(u *db.User, requested int64) int64 {
 
 func (s *Server) handleDatabaseList(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
-	rows, err := s.databases.ListDatabases(r.Context(), databases.VisibleTo(u))
+	rows, err := s.databases.ListDatabases(r.Context(), auth.ScopeFor(u))
 	if err != nil {
 		s.log.Error("httpapi: list databases", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -76,7 +76,7 @@ func (s *Server) handleDatabaseList(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		out = append(out, viewDatabase(row))
 	}
-	users, err := s.db.ListDBUsers(r.Context(), databases.VisibleTo(u))
+	users, err := s.db.ListDBUsers(r.Context(), auth.ScopeFor(u))
 	if err != nil {
 		s.log.Error("httpapi: list database users", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")

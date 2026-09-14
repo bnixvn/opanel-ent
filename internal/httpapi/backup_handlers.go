@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/backuparchive"
 	"github.com/bnixvn/opanel-ent/internal/backups"
 	"github.com/bnixvn/opanel-ent/internal/db"
@@ -104,7 +105,7 @@ func (s *Server) loadBackup(w http.ResponseWriter, r *http.Request) *db.Backup {
 
 func (s *Server) handleBackupList(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
-	scope := u.ID
+	scope := auth.ScopeFor(u)
 	// A named owner is resolved for everyone, so an end user who asks for
 	// somebody else's list is told no rather than quietly handed their own.
 	if r.URL.Query().Get("owner") != "" {
@@ -112,9 +113,7 @@ func (s *Server) handleBackupList(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		scope = o.ID
-	} else if roleAtLeastReseller(u) {
-		scope = 0 // staff see the whole server by default
+		scope = db.ScopeSelf(o.ID)
 	}
 	rows, err := s.db.ListBackups(r.Context(), scope)
 	if err != nil {

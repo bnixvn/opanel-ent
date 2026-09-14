@@ -11,14 +11,14 @@ import (
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("db: not found")
 
-const userCols = `id, username, email, password_hash, role, linux_uid,
+const userCols = `id, username, email, password_hash, role, parent_id, linux_uid,
 	totp_secret, totp_enabled, suspended, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
-	var uid sql.NullInt64
+	var uid, parent sql.NullInt64
 	var created, updated string
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &uid,
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &parent, &uid,
 		&u.TOTPSecret, &u.TOTPEnabled, &u.Suspended, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -28,6 +28,9 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	}
 	if uid.Valid {
 		u.LinuxUID = &uid.Int64
+	}
+	if parent.Valid {
+		u.ParentID = &parent.Int64
 	}
 	if u.CreatedAt, err = parseTime(created); err != nil {
 		return nil, fmt.Errorf("db: user %d created_at: %w", u.ID, err)
@@ -43,10 +46,10 @@ func (d *DB) CreateUser(ctx context.Context, u *User) (*User, error) {
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
 	res, err := d.ExecContext(ctx,
-		`INSERT INTO users (username, email, password_hash, role, linux_uid,
+		`INSERT INTO users (username, email, password_hash, role, parent_id, linux_uid,
 			totp_secret, totp_enabled, suspended, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		u.Username, u.Email, u.PasswordHash, u.Role, u.LinuxUID,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		u.Username, u.Email, u.PasswordHash, u.Role, u.ParentID, u.LinuxUID,
 		u.TOTPSecret, u.TOTPEnabled, u.Suspended, fmtTime(now), fmtTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("db: create user %q: %w", u.Username, err)
@@ -95,8 +98,13 @@ func (d *DB) SetTOTP(ctx context.Context, userID int64, secret string, enabled b
 
 // ListUsers returns panel users ordered by id. When createdBy is non-zero the
 // listing is restricted to users a reseller provisioned.
-func (d *DB) ListUsers(ctx context.Context) ([]*User, error) {
-	rows, err := d.QueryContext(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
+func (d *DB) ListUsers(ctx context.Context, scope Scope) ([]*User, error) {
+	// An account is in scope when the caller owns it, when the caller is it,
+	// or when the caller is an administrator. "id" stands in for the owner
+	// column here because a user row is owned by the user it describes.
+	where, args := scope.Where("id", "parent_id")
+	rows, err := d.QueryContext(ctx,
+		`SELECT `+userCols+` FROM users WHERE `+where+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}

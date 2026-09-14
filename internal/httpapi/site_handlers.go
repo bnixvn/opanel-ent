@@ -58,7 +58,7 @@ func certExpiresText(s *db.Site) string {
 
 func (s *Server) handleSiteList(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
-	rows, err := s.db.ListSites(r.Context(), sites.VisibleTo(u))
+	rows, err := s.db.ListSites(r.Context(), auth.ScopeFor(u))
 	if err != nil {
 		s.log.Error("httpapi: list sites", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -92,7 +92,7 @@ func (s *Server) loadSite(w http.ResponseWriter, r *http.Request) *db.Site {
 	u := userFrom(r.Context())
 	// An end user asking for someone else's site gets 404, not 403: a 403
 	// would confirm the site exists.
-	if !auth.Role(u.Role).AtLeast(auth.RoleReseller) && site.OwnerID != u.ID {
+	if !auth.OwnsResource(u, site.OwnerID, site.OwnerParentID) {
 		writeError(w, http.StatusNotFound, "not_found", "no such site")
 		return nil
 	}

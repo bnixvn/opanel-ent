@@ -19,7 +19,6 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
-	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
@@ -417,7 +416,7 @@ func (s *Service) RenewDueCertificates(ctx context.Context, email string) (renew
 // database. Every mutation ends here, which is what guarantees the rendered
 // configuration and the database never drift apart.
 func (s *Service) SyncWebserver(ctx context.Context) error {
-	rows, err := s.db.ListSites(ctx, 0)
+	rows, err := s.db.ListSites(ctx, db.ScopeAll())
 	if err != nil {
 		return err
 	}
@@ -473,7 +472,7 @@ func (s *Service) SetSFTPPassword(ctx context.Context, u *db.User, password stri
 // renderer would catch this too, but failing here names the request that is
 // wrong instead of failing every later apply.
 func (s *Service) checkHostnamesFree(ctx context.Context, domain string, aliases []string, exceptID int64) error {
-	rows, err := s.db.ListSites(ctx, 0)
+	rows, err := s.db.ListSites(ctx, db.ScopeAll())
 	if err != nil {
 		return err
 	}
@@ -512,11 +511,6 @@ func (s *Service) requirePHP(ctx context.Context, version string) error {
 	return fmt.Errorf("%w: PHP %s is not offered by provider %q", ErrPHPNotReady, version, res.Provider)
 }
 
-// VisibleTo restricts a listing to what a role may see: administrators and
-// resellers see everything, an end user only their own sites.
-func VisibleTo(u *db.User) int64 {
-	if auth.Role(u.Role).AtLeast(auth.RoleReseller) {
-		return 0
-	}
-	return u.ID
-}
+// VisibleTo is gone. Listings take an auth.ScopeFor(user) now, which can
+// express "mine and my customers'" -- the case a reseller needs and a single
+// owner id cannot describe.

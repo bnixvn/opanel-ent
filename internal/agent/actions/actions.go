@@ -32,6 +32,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerSites(r, deps)
 	registerDatabases(r)
 	registerQuota(r)
+	registerXFSQuota(r)
 	registerFiles(r)
 	registerBackup(r)
 	registerWordPress(r, deps)

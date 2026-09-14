@@ -10,12 +10,15 @@ type User struct {
 	Email        string
 	PasswordHash string
 	Role         string
-	LinuxUID     *int64
-	TOTPSecret   string
-	TOTPEnabled  bool
-	Suspended    bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// ParentID is the reseller who owns this account, nil when the account
+	// belongs to the server itself.
+	ParentID    *int64
+	LinuxUID    *int64
+	TOTPSecret  string
+	TOTPEnabled bool
+	Suspended   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Session struct {

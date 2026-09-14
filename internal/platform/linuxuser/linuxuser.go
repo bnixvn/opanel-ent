@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
@@ -218,4 +219,60 @@ func ensureGroup(ctx context.Context, name string) error {
 		return fmt.Errorf("linuxuser: create group %q: %w", name, err)
 	}
 	return nil
+}
+
+// List returns the site accounts the panel provisioned.
+//
+// Membership of the SFTP group is what identifies them, not a uid range: a
+// uid range would sweep in any account an operator created by hand, and
+// stamping a filesystem quota on somebody else's home is not a mistake worth
+// risking.
+func List(ctx context.Context) ([]Account, error) {
+	// os/user can look a group up but not enumerate its members, so the
+	// membership comes from the file the group database is kept in.
+	names, err := groupMembers(SFTPGroup)
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(names)
+
+	out := make([]Account, 0, len(names))
+	for _, name := range names {
+		acct, err := Lookup(name)
+		if err != nil || acct == nil {
+			// A group member with no passwd entry is a leftover, not a
+			// reason to fail the whole listing.
+			continue
+		}
+		out = append(out, *acct)
+	}
+	_ = ctx
+	return out, nil
+}
+
+// groupMembers returns the supplementary members of a group.
+func groupMembers(group string) ([]string, error) {
+	body, err := os.ReadFile("/etc/group")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for line := range strings.SplitSeq(string(body), "\n") {
+		// name:password:gid:member,member
+		parts := strings.Split(line, ":")
+		if len(parts) < 4 || parts[0] != group {
+			continue
+		}
+		members := strings.Split(parts[3], ",")
+		out := make([]string, 0, len(members))
+		for _, m := range members {
+			if m = strings.TrimSpace(m); m != "" {
+				out = append(out, m)
+			}
+		}
+		return out, nil
+	}
+	return nil, nil
 }

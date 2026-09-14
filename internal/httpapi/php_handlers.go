@@ -7,6 +7,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
+	"github.com/bnixvn/opanel-ent/internal/db"
 )
 
 // handlePHPList reports every PHP version the active provider offers and
@@ -40,7 +41,7 @@ func (s *Server) handlePHPUninstall(w http.ResponseWriter, r *http.Request) {
 
 	// Refuse while a site still points at it: removing the interpreter would
 	// turn those sites into 503s with nothing in the panel explaining why.
-	rows, err := s.db.ListSites(r.Context(), 0)
+	rows, err := s.db.ListSites(r.Context(), db.ScopeAll())
 	if err != nil {
 		s.log.Error("httpapi: list sites", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")

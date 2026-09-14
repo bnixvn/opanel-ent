@@ -97,7 +97,7 @@ func (s *Service) ResolveOwner(ctx context.Context, actor *db.User, requested st
 
 // CanReach reports whether the actor may act on an existing backup row.
 func CanReach(actor *db.User, b *db.Backup) bool {
-	return b.OwnerID == actor.ID || auth.Role(actor.Role).AtLeast(auth.RoleReseller)
+	return auth.OwnsResource(actor, b.OwnerID, b.OwnerParentID)
 }
 
 // Request describes a backup to take.
@@ -229,7 +229,7 @@ func (s *Service) regrant(ctx context.Context, ownerID int64, restored []string)
 	for _, n := range restored {
 		wanted[n] = true
 	}
-	rows, err := s.db.ListDatabases(ctx, ownerID)
+	rows, err := s.db.ListDatabases(ctx, db.ScopeSelf(ownerID))
 	if err != nil {
 		s.log.Error("backups: cannot re-apply grants after restore", "err", err)
 		return
@@ -364,7 +364,7 @@ func (s *Service) ownerDatabases(ctx context.Context, ownerID int64, include boo
 	if !include {
 		return nil, nil
 	}
-	rows, err := s.db.ListDatabases(ctx, ownerID)
+	rows, err := s.db.ListDatabases(ctx, db.ScopeSelf(ownerID))
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func (s *Service) ownerDatabases(ctx context.Context, ownerID int64, include boo
 // ownerSites records the site rows in the manifest, so an account restored
 // onto a fresh server does not lose which PHP version each site ran.
 func (s *Service) ownerSites(ctx context.Context, ownerID int64) ([]backuparchive.ManifestSite, error) {
-	rows, err := s.db.ListSites(ctx, ownerID)
+	rows, err := s.db.ListSites(ctx, db.ScopeSelf(ownerID))
 	if err != nil {
 		return nil, err
 	}

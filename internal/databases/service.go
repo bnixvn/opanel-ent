@@ -19,7 +19,6 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
-	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/dbms"
 )
@@ -249,8 +248,8 @@ func (s *Service) pair(ctx context.Context, databaseID, userID int64) (*db.Datab
 }
 
 // ListDatabases returns databases with their sizes filled in.
-func (s *Service) ListDatabases(ctx context.Context, ownerID int64) ([]*db.Database, error) {
-	rows, err := s.db.ListDatabases(ctx, ownerID)
+func (s *Service) ListDatabases(ctx context.Context, scope db.Scope) ([]*db.Database, error) {
+	rows, err := s.db.ListDatabases(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -272,14 +271,9 @@ func (s *Service) ListDatabases(ctx context.Context, ownerID int64) ([]*db.Datab
 // is faster, but a hostname works from every language without configuration.
 const ConnectionHost = "127.0.0.1"
 
-// VisibleTo restricts a listing the way sites are restricted: staff see
-// everything, an end user only their own.
-func VisibleTo(u *db.User) int64 {
-	if auth.Role(u.Role).AtLeast(auth.RoleReseller) {
-		return 0
-	}
-	return u.ID
-}
+// VisibleTo is gone. Listings take an auth.ScopeFor(user) now, which can
+// express "mine and my customers'" -- the case a reseller needs and a single
+// owner id cannot describe.
 
 // SuffixOf strips the owner prefix for display, so a user sees the part they
 // chose rather than the full name every time.

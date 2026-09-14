@@ -77,7 +77,7 @@ type Result struct {
 
 // CanReach reports whether the actor may install into this site.
 func CanReach(actor *db.User, site *db.Site) bool {
-	return site.OwnerID == actor.ID || auth.Role(actor.Role).AtLeast(auth.RoleReseller)
+	return auth.OwnsResource(actor, site.OwnerID, site.OwnerParentID)
 }
 
 // Install provisions a database, an account for it, and WordPress itself.
