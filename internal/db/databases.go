@@ -279,3 +279,28 @@ func (d *DB) CountDatabasesByOwner(ctx context.Context, ownerID int64) (int, err
 	err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_databases WHERE owner_id = ?`, ownerID).Scan(&n)
 	return n, err
 }
+
+// DBUsersByOwner lists the database accounts belonging to one panel user.
+//
+// For deleting that user: their database accounts are credentials of theirs,
+// not resources they own, and leaving one behind means a MariaDB login with
+// grants and nobody to answer for it.
+func (d *DB) DBUsersByOwner(ctx context.Context, ownerID int64) ([]*DBUser, error) {
+	rows, err := d.QueryContext(ctx,
+		`SELECT `+dbUserCols+` FROM db_users x JOIN users u ON u.id = x.owner_id`+
+			` WHERE x.owner_id = ? ORDER BY x.username`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]*DBUser, 0, 4)
+	for rows.Next() {
+		u, err := scanDBUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

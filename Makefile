@@ -16,22 +16,30 @@ DIST      ?= dist
 
 export CGO_ENABLED = 0
 
-# Every binary target is phony on purpose. A pattern rule with no
-# prerequisites is satisfied the moment the file exists, so `make build`
-# silently did nothing after the first run and shipped a stale binary --
-# which is the worst way for a build to fail, because it looks like it
-# worked. Listing the Go sources as prerequisites would be the other fix and
-# a worse one: go build already knows what changed, and its cache makes a
-# no-op rebuild cost a second.
-.PHONY: all build web linux test lint vet fmt tidy clean check $(BINARIES:%=$(DIST)/%)
+.PHONY: all build web linux test lint vet fmt tidy clean check FORCE
 
 all: check build
 
 build: $(BINARIES:%=$(DIST)/%)
 
-$(DIST)/%:
+# FORCE rather than a list of Go sources, and never .PHONY: make does not
+# apply pattern rules to phony targets, so marking these phony removes the
+# only recipe that builds them and `make build` does nothing at all.
+#
+# Without either, a pattern rule with no prerequisites is satisfied the
+# moment the file exists: `make build` stopped rebuilding after the first
+# run and shipped the previous binary, which is the worst way for a build to
+# fail because it looks like it worked.
+#
+# go build is the right thing to decide what needs doing -- it already knows
+# what changed, and its cache makes a no-op rebuild cost about a second.
+$(DIST)/%: FORCE
 	@mkdir -p $(DIST)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/$*
+
+# An empty rule with no prerequisites of its own: anything depending on it is
+# always out of date.
+FORCE:
 
 # The interface. Its build output lands in internal/httpapi/web, which is
 # committed, so `go build` works on a clone that has never seen npm -- the

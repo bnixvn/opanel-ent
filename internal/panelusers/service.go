@@ -205,6 +205,18 @@ func (s *Service) Delete(ctx context.Context, id int64, removeFiles bool) error 
 		}
 	}
 
+	// Their database accounts go with them. Those are credentials belonging
+	// to this user rather than resources they own -- refusing the delete
+	// because one exists would be bureaucratic, and leaving one behind is
+	// worse: a MariaDB login with grants and nobody to answer for it.
+	//
+	// Sites and databases are the opposite, and keep their RESTRICT above:
+	// they hold data, and losing a customer's files to a misclick is not a
+	// thing to be helpful about.
+	if err := s.dropDatabaseAccounts(ctx, id); err != nil {
+		return err
+	}
+
 	if err := s.db.DeleteUser(ctx, id); err != nil {
 		return err
 	}
@@ -358,4 +370,26 @@ func (s *Service) EnableFileAccess(ctx context.Context, id int64) (string, error
 		return "", fmt.Errorf("set SFTP password: %w", err)
 	}
 	return password[0], nil
+}
+
+// dropDatabaseAccounts removes a user's MariaDB logins, server first.
+//
+// The server before the record, the same way they were created: an account
+// on the server with no row is visible and fixable, while a row with no
+// account behind it is a credential the panel thinks exists.
+func (s *Service) dropDatabaseAccounts(ctx context.Context, ownerID int64) error {
+	accounts, err := s.db.DBUsersByOwner(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	for _, a := range accounts {
+		if _, err := agentclient.Call[struct{}](ctx, s.agent, "dbuser.drop", 1,
+			actions.DBUserRequest{Username: a.Username}); err != nil {
+			return fmt.Errorf("remove database account %q: %w", a.Username, err)
+		}
+		if err := s.db.DeleteDBUserRecord(ctx, a.ID); err != nil {
+			return fmt.Errorf("forget database account %q: %w", a.Username, err)
+		}
+	}
+	return nil
 }
