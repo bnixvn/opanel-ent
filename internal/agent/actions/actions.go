@@ -6,6 +6,7 @@ package actions
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
@@ -26,7 +27,7 @@ type Deps struct {
 
 // RegisterAll wires every action into r.
 func RegisterAll(r *agent.Registry, deps Deps) {
-	registerCore(r)
+	registerCore(r, deps)
 	registerSysStat(r)
 	registerSystemd(r)
 	registerPackages(r)
@@ -66,15 +67,29 @@ type PingResult struct {
 type SysInfoResult struct {
 	Distro distro.Info `json:"distro"`
 	Uptime string      `json:"uptime,omitempty"`
+	// Webserver and PHPProvider are what this agent is actually driving,
+	// which is the question the panel's System page is asking. The panel's
+	// own configuration answers a different one: it holds "" for the PHP
+	// provider, meaning "work it out", and printing that told an operator
+	// their server had no PHP provider at all.
+	Webserver   string `json:"webserver,omitempty"`
+	PHPProvider string `json:"php_provider,omitempty"`
 }
 
-func registerCore(r *agent.Registry) {
+func registerCore(r *agent.Registry, deps Deps) {
 	agent.Register(r, "ping", 1, func(context.Context, struct{}) (PingResult, error) {
 		return PingResult{Agent: "opanel-agent", Version: version.String(), PID: os.Getpid()}, nil
 	})
 
 	agent.Register(r, "sysinfo", 1, func(ctx context.Context, _ struct{}) (SysInfoResult, error) {
-		return SysInfoResult{Distro: distro.Detect(ctx)}, nil
+		out := SysInfoResult{Distro: distro.Detect(ctx), Uptime: hostUptime()}
+		if deps.Webserver != nil {
+			out.Webserver = deps.Webserver.Name()
+		}
+		if deps.PHP != nil {
+			out.PHPProvider = deps.PHP.Name()
+		}
+		return out, nil
 	})
 
 	// Reports what this agent build actually serves, so opanelctl and the
@@ -83,4 +98,20 @@ func registerCore(r *agent.Registry) {
 	agent.Register(r, "agent.actions", 1, func(context.Context, struct{}) (map[string]int, error) {
 		return r.Actions(), nil
 	})
+}
+
+// hostUptime is how long the machine has been up, in a form meant to be read
+// rather than parsed.
+func hostUptime() string {
+	seconds := uptimeSeconds()
+	if seconds <= 0 {
+		return ""
+	}
+	d := seconds / 86400
+	h := (seconds % 86400) / 3600
+	m := (seconds % 3600) / 60
+	if d > 0 {
+		return fmt.Sprintf("%dd %dh", d, h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
 }

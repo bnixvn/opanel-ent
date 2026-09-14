@@ -55,6 +55,10 @@ jobs:
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tags, so the build can name itself. Without them git describe
+          # sees no tag and every artifact reports "dev".
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
@@ -67,10 +71,19 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           mkdir -p dist
+          # The same stamping the Makefile does. It was missing here, so
+          # every binary this workflow published called itself "dev" -- and
+          # the System page, which reads it, agreed.
+          PKG=github.com/bnixvn/opanel-ent/internal/version
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+          COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo '')
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           for b in opanel-api opanel-agent opanelctl; do
-            go build -trimpath -ldflags '-s -w' -o "dist/$b" "./cmd/$b"
+            LDFLAGS="-s -w -X $PKG.Version=$VERSION -X $PKG.Commit=$COMMIT -X $PKG.Date=$DATE"
+            go build -trimpath -ldflags "$LDFLAGS" -o "dist/$b" "./cmd/$b"
           done
           ls -lh dist
+          ./dist/opanelctl version || true
 
       - uses: actions/upload-artifact@v4
         with:

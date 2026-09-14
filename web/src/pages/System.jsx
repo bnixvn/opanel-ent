@@ -37,11 +37,11 @@ export default function System() {
       {info && (
         <Card title="This server">
           <dl className="kv">
-            <dt>Panel</dt><dd>{info.panel_version}</dd>
-            <dt>Operating system</dt>
-            <dd>{info.distro ? `${info.distro.name || ''} ${info.distro.version || ''}`.trim() : '—'}</dd>
-            <dt>Webserver</dt><dd>{info.webserver_backend}</dd>
-            <dt>PHP provider</dt><dd>{info.php_provider}</dd>
+            <dt>Panel</dt><dd>{info.panel_version || '—'}</dd>
+            <dt>Operating system</dt><dd>{describeDistro(info.distro)}</dd>
+            {info.uptime && <><dt>Uptime</dt><dd>{info.uptime}</dd></>}
+            <dt>Webserver</dt><dd>{info.webserver_backend || '—'}</dd>
+            <dt>PHP provider</dt><dd>{info.php_provider || '—'}</dd>
           </dl>
         </Card>
       )}
@@ -118,4 +118,17 @@ export default function System() {
       </Card>
     </>
   );
+}
+
+// describeDistro reads the shape the agent actually sends.
+//
+// It was reading name and version, which the agent has never sent -- the
+// fields are id, version_id and pretty -- so the row was blank on every
+// server, and blank reads as "the panel cannot tell" rather than "the panel
+// is looking in the wrong place".
+function describeDistro(d) {
+  if (!d) return '—';
+  if (d.pretty) return d.cloudlinux ? `${d.pretty} (CloudLinux)` : d.pretty;
+  const named = [d.id, d.version_id].filter(Boolean).join(' ');
+  return named || '—';
 }

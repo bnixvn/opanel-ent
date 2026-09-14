@@ -64,11 +64,24 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		s.agentError(w, err)
 		return
 	}
+	// What the agent is actually driving, falling back to what the panel was
+	// configured with. The configuration is allowed to say nothing -- an
+	// empty PHP provider means "detect one" -- so reporting it directly told
+	// an operator their server had no PHP provider at all.
+	webserver := info.Webserver
+	if webserver == "" {
+		webserver = s.cfg.WebserverBackend
+	}
+	php := info.PHPProvider
+	if php == "" {
+		php = s.cfg.PHPProvider
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"panel_version":     version.String(),
 		"distro":            info.Distro,
-		"webserver_backend": s.cfg.WebserverBackend,
-		"php_provider":      s.cfg.PHPProvider,
+		"uptime":            info.Uptime,
+		"webserver_backend": webserver,
+		"php_provider":      php,
 	})
 }
 
