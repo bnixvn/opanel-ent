@@ -20,6 +20,12 @@ type Passkey struct {
 	Transports string
 	CreatedAt  time.Time
 	LastUsedAt time.Time
+	// BackupEligible and BackupState are the flags the credential was
+	// registered with. Pointers because nil is a third state that matters:
+	// a row written before these existed knows nothing, and answering
+	// "false" on its behalf is what stopped every phone passkey working.
+	BackupEligible *bool
+	BackupState    *bool
 }
 
 // PasskeyChallenge is an in-flight ceremony.
@@ -32,13 +38,14 @@ type PasskeyChallenge struct {
 }
 
 const passkeyCols = `id, user_id, label, public_key, aaguid, sign_count,
-	resident, transports, created_at, last_used_at`
+	resident, transports, created_at, last_used_at, backup_eligible, backup_state`
 
 func scanPasskey(row interface{ Scan(...any) error }) (*Passkey, error) {
 	var k Passkey
 	var created, used string
+	var be, bs sql.NullBool
 	err := row.Scan(&k.ID, &k.UserID, &k.Label, &k.PublicKey, &k.AAGUID,
-		&k.SignCount, &k.Resident, &k.Transports, &created, &used)
+		&k.SignCount, &k.Resident, &k.Transports, &created, &used, &be, &bs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -47,6 +54,12 @@ func scanPasskey(row interface{ Scan(...any) error }) (*Passkey, error) {
 	}
 	k.CreatedAt, _ = parseTime(created)
 	k.LastUsedAt, _ = parseTime(used)
+	if be.Valid {
+		k.BackupEligible = &be.Bool
+	}
+	if bs.Valid {
+		k.BackupState = &bs.Bool
+	}
 	return &k, nil
 }
 
@@ -54,10 +67,11 @@ func scanPasskey(row interface{ Scan(...any) error }) (*Passkey, error) {
 func (d *DB) CreatePasskey(ctx context.Context, k *Passkey) error {
 	_, err := d.ExecContext(ctx,
 		`INSERT INTO passkeys (id, user_id, label, public_key, aaguid, sign_count,
-			resident, transports, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?)`,
+			resident, transports, created_at, backup_eligible, backup_state)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		k.ID, k.UserID, k.Label, k.PublicKey, k.AAGUID, k.SignCount,
-		k.Resident, k.Transports, fmtTime(time.Now()))
+		k.Resident, k.Transports, fmtTime(time.Now()),
+		nullBool(k.BackupEligible), nullBool(k.BackupState))
 	if err != nil {
 		return fmt.Errorf("db: register passkey: %w", err)
 	}
@@ -111,11 +125,26 @@ func (d *DB) DeletePasskey(ctx context.Context, userID int64, id string) error {
 }
 
 // TouchPasskey records a successful sign-in and the new signature counter.
-func (d *DB) TouchPasskey(ctx context.Context, id string, signCount uint32) error {
+func (d *DB) TouchPasskey(ctx context.Context, id string, signCount uint32,
+	backupEligible, backupState *bool) error {
+	// The backup flags are written on every sign-in, not just the first.
+	// BackupState legitimately changes -- a key becomes backed up when
+	// somebody turns on syncing -- and a row that never learns the new value
+	// is a row that disagrees with the next assertion.
 	_, err := d.ExecContext(ctx,
-		`UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?`,
-		signCount, fmtTime(time.Now()), id)
+		`UPDATE passkeys SET sign_count = ?, last_used_at = ?,
+			backup_eligible = ?, backup_state = ? WHERE id = ?`,
+		signCount, fmtTime(time.Now()),
+		nullBool(backupEligible), nullBool(backupState), id)
 	return err
+}
+
+// nullBool turns "we do not know" into a NULL the database can hold.
+func nullBool(b *bool) any {
+	if b == nil {
+		return nil
+	}
+	return *b
 }
 
 // CreatePasskeyChallenge stores an in-flight ceremony.

@@ -139,9 +139,19 @@ func (s *Server) checkPasskeyFactor(w http.ResponseWriter, r *http.Request, user
 		writeError(w, http.StatusBadRequest, "bad_request", "the authenticator's reply was unusable")
 		return false
 	}
+	// Credentials registered before the backup flags were stored know
+	// nothing about them, and the library compares what it is given against
+	// the assertion. Take them from the assertion rather than let a zero
+	// value speak for a key that was registered correctly.
+	flags := parsed.Response.AuthenticatorData.Flags
+	passkey.AdoptUnknownFlags(wu, flags.HasBackupEligible(), flags.HasBackupState())
+
 	cred, err := wa.ValidateLogin(wu, *session.Data, parsed)
 	if err != nil {
-		s.audit(r, "auth.login", user.Username, false, "passkey rejected")
+		// Logged, because the reply to the browser is deliberately vague and
+		// the reason this fails is almost never the account holder's doing.
+		s.log.Warn("httpapi: passkey rejected", "user", user.Username, "err", err)
+		s.audit(r, "auth.login", user.Username, false, "passkey rejected: "+err.Error())
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "that passkey was not accepted")
 		return false
 	}
@@ -152,6 +162,7 @@ func (s *Server) checkPasskeyFactor(w http.ResponseWriter, r *http.Request, user
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "that passkey was not accepted")
 		return false
 	}
-	_ = s.db.TouchPasskey(r.Context(), credentialID(cred), cred.Authenticator.SignCount)
+	be, bs := cred.Flags.BackupEligible, cred.Flags.BackupState
+	_ = s.db.TouchPasskey(r.Context(), credentialID(cred), cred.Authenticator.SignCount, &be, &bs)
 	return true
 }

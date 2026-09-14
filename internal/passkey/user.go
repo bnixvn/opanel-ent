@@ -50,7 +50,7 @@ func (u *User) WebAuthnCredentials() []webauthn.Credential {
 		if k.AAGUID != "" {
 			aaguid, _ = base64.StdEncoding.DecodeString(k.AAGUID)
 		}
-		out = append(out, webauthn.Credential{
+		c := webauthn.Credential{
 			ID:        id,
 			PublicKey: key,
 			Authenticator: webauthn.Authenticator{
@@ -58,7 +58,18 @@ func (u *User) WebAuthnCredentials() []webauthn.Credential {
 				SignCount: k.SignCount,
 			},
 			Transport: transports(k.Transports),
-		})
+		}
+		// The library refuses a sign-in when these disagree with the
+		// assertion, so what is stored has to be what was registered. A row
+		// that predates the columns knows neither, and the caller adopts
+		// them from the first assertion instead -- see AdoptUnknownFlags.
+		if k.BackupEligible != nil {
+			c.Flags.BackupEligible = *k.BackupEligible
+		}
+		if k.BackupState != nil {
+			c.Flags.BackupState = *k.BackupState
+		}
+		out = append(out, c)
 	}
 	return out
 }
@@ -69,15 +80,18 @@ func Row(userID int64, label string, c *webauthn.Credential) *db.Passkey {
 	for _, t := range c.Transport {
 		names = append(names, string(t))
 	}
+	be, bs := c.Flags.BackupEligible, c.Flags.BackupState
 	return &db.Passkey{
-		ID:         base64.RawURLEncoding.EncodeToString(c.ID),
-		UserID:     userID,
-		Label:      label,
-		PublicKey:  base64.StdEncoding.EncodeToString(c.PublicKey),
-		AAGUID:     base64.StdEncoding.EncodeToString(c.Authenticator.AAGUID),
-		SignCount:  c.Authenticator.SignCount,
-		Resident:   c.Flags.UserPresent && c.Flags.UserVerified,
-		Transports: strings.Join(names, " "),
+		BackupEligible: &be,
+		BackupState:    &bs,
+		ID:             base64.RawURLEncoding.EncodeToString(c.ID),
+		UserID:         userID,
+		Label:          label,
+		PublicKey:      base64.StdEncoding.EncodeToString(c.PublicKey),
+		AAGUID:         base64.StdEncoding.EncodeToString(c.Authenticator.AAGUID),
+		SignCount:      c.Authenticator.SignCount,
+		Resident:       c.Flags.UserPresent && c.Flags.UserVerified,
+		Transports:     strings.Join(names, " "),
 	}
 }
 
@@ -113,4 +127,33 @@ func itoa(n int64) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// AdoptUnknownFlags fills in the backup flags of credentials registered
+// before they were stored.
+//
+// Those rows know nothing, and the library compares what it is given against
+// what the assertion carries -- so left at their zero value they claim every
+// credential is backup-ineligible, which every phone passkey contradicts.
+// Taking the values from the assertion is trust on first use, and costs
+// nothing: these flags describe where a key is kept, not who is presenting
+// it, and the signature is still checked against the public key registered
+// for this account.
+//
+// Returns the values used, so the caller can write them down and not have to
+// trust anything a second time.
+func AdoptUnknownFlags(u *User, eligible, state bool) (adopted bool) {
+	for _, k := range u.Credentials {
+		if k.BackupEligible == nil {
+			e := eligible
+			k.BackupEligible = &e
+			adopted = true
+		}
+		if k.BackupState == nil {
+			st := state
+			k.BackupState = &st
+			adopted = true
+		}
+	}
+	return adopted
 }
