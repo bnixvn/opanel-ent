@@ -7,6 +7,7 @@ export default function Files({ me }) {
   const [owners, setOwners] = useState([]);
   const [path, setPath] = useState('');
   const [entries, setEntries] = useState([]);
+  const [home, setHome] = useState('');
   const [limits, setLimits] = useState({ max_upload_bytes: 0, max_edit_bytes: 0 });
   const [editing, setEditing] = useState(null);
   const [renaming, setRenaming] = useState(null);
@@ -26,6 +27,7 @@ export default function Files({ me }) {
       const res = await api.get(`/files?${params}`);
       setEntries(res.entries || []);
       setPath(res.path || '');
+      setHome(res.home || '');
       msg.clear();
     } catch (err) {
       msg.fail(err);
@@ -130,11 +132,13 @@ export default function Files({ me }) {
           )}
           <div className="grow">
             <label>Location</label>
-            <div>
-              <button type="button" className="link" onClick={() => load('')}>home</button>
+            <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.85rem' }}>
+              <button type="button" className="link" onClick={() => load('')}>
+                {home || '/home'}
+              </button>
               {crumbs.map((c, i) => (
                 <span key={`${c}-${i}`}>
-                  <span className="muted"> / </span>
+                  <span className="muted">/</span>
                   <button
                     type="button"
                     className="link"
@@ -144,6 +148,11 @@ export default function Files({ me }) {
                   </button>
                 </span>
               ))}
+            </div>
+            <div className="muted" style={{ fontSize: '.78rem', marginTop: '.15rem' }}>
+              Everything below is inside this account&apos;s home directory. A
+              website called example.com lives at{' '}
+              <code>{home || '/home/<user>'}/example.com/public_html</code>.
             </div>
           </div>
           <div className="nowrap">

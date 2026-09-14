@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { api, setUnauthorizedHandler } from './api.js';
 import Login from './Login.jsx';
-import Dashboard from './pages/Dashboard.jsx';
 import Sites from './pages/Sites.jsx';
 import Databases from './pages/Databases.jsx';
 import Files from './pages/Files.jsx';
@@ -21,9 +20,8 @@ import Settings from './pages/Settings.jsx';
 // The menu. `roles` lists who sees an entry; the API enforces the same rule,
 // so hiding one is a convenience and never the protection.
 const MENU = [
-  { group: 'Hosting', items: [
-    { to: '/', label: 'Dashboard', end: true },
-    { to: '/sites', label: 'Websites' },
+  { group: '', items: [
+    { to: '/', label: 'Websites', end: true },
     { to: '/databases', label: 'Databases' },
     { to: '/files', label: 'File manager' },
     { to: '/backups', label: 'Backups' },
@@ -113,8 +111,8 @@ export default function App() {
           const items = section.items.filter((i) => visible(i, role));
           if (!items.length) return null;
           return (
-            <div key={section.group}>
-              <div className="group">{section.group}</div>
+            <div key={section.group || 'top'}>
+              {section.group && <div className="group">{section.group}</div>}
               {items.map((item) => (
                 <NavLink
                   key={item.to}
@@ -162,7 +160,10 @@ export default function App() {
 
         <main className="content">
           <Routes>
-            <Route path="/" element={<Dashboard me={me} />} />
+            {/* Websites is the landing page: it is what an operator opens
+                the panel to look at, and a dashboard that only restated the
+                same numbers was a click in the way. */}
+            <Route path="/" element={<Sites me={me} />} />
             <Route path="/sites/*" element={<Sites me={me} />} />
             <Route path="/databases" element={<Databases me={me} />} />
             <Route path="/files" element={<Files me={me} />} />
@@ -197,5 +198,5 @@ function pageTitle(path) {
   const found = MENU.flatMap((s) => s.items).find(
     (i) => (i.end ? path === i.to : path.startsWith(i.to)),
   );
-  return found ? found.label : 'Dashboard';
+  return found ? found.label : 'Websites';
 }

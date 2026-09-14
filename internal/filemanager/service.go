@@ -20,6 +20,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 )
 
 // ErrNoAccount means the panel user has no Linux account, so there are no
@@ -48,6 +49,13 @@ func New(database *db.DB, ac *agentclient.Client, log *slog.Logger) *Service {
 type Owner struct {
 	UserID   int64
 	Username string
+	// Home is the absolute path the browsing is confined to.
+	//
+	// Carried through to the interface on purpose. Showing only a relative
+	// path made websites look as though they lived at /home/<domain>, and
+	// an administrator browsing somebody else's files could not tell whose
+	// they were from the path alone.
+	Home string
 }
 
 // ResolveOwner decides whose files the caller is asking for.
@@ -73,7 +81,14 @@ func (s *Service) ResolveOwner(ctx context.Context, actor *db.User, requested st
 	if target.LinuxUID == nil || *target.LinuxUID == 0 {
 		return Owner{}, ErrNoAccount
 	}
-	return Owner{UserID: target.ID, Username: target.Username}, nil
+	home, err := s.db.UserLinuxHome(ctx, target.ID)
+	if err != nil || home == "" {
+		// The column is filled when the account is provisioned; falling back
+		// to the convention keeps the display right for a row that predates
+		// it rather than showing nothing.
+		home = linuxuser.Home(target.Username)
+	}
+	return Owner{UserID: target.ID, Username: target.Username, Home: home}, nil
 }
 
 // List returns one directory's contents.

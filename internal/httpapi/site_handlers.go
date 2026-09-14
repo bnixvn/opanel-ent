@@ -154,6 +154,86 @@ type updateSiteRequest struct {
 	WAFEnabled  *bool     `json:"waf_enabled,omitempty"`
 }
 
+// handleSiteOwner hands a website to another account, files and all.
+//
+// A separate endpoint rather than a field on the update, because it is the
+// only site change that moves data on disk and can take minutes on a large
+// site. Staff only, and both the current and the new owner have to be
+// accounts the caller may manage -- otherwise a reseller could move a site
+// out of their own subtree and lose sight of it, or take one from somebody
+// else's.
+func (s *Server) handleSiteOwner(w http.ResponseWriter, r *http.Request) {
+	site := s.loadSite(w, r)
+	if site == nil {
+		return
+	}
+	var req struct {
+		OwnerID int64 `json:"owner_id"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	actor := userFrom(r.Context())
+
+	newOwner, err := s.db.UserByID(r.Context(), req.OwnerID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "no such account")
+		return
+	}
+	if !auth.CanSee(actor, newOwner) {
+		writeError(w, http.StatusForbidden, "forbidden",
+			"that account is not one you can hand a website to")
+		return
+	}
+
+	// Read before the move, because afterwards the site row names the new
+	// owner and the old one would be unrecoverable from it.
+	oldOwnerRow, _ := s.db.UserByID(r.Context(), site.OwnerID)
+
+	updated, err := s.sites.ChangeOwner(r.Context(), site.ID, req.OwnerID)
+	if err != nil {
+		s.audit(r, "site.owner", site.Domain, false, err.Error())
+		s.siteError(w, err)
+		return
+	}
+	s.audit(r, "site.owner", site.Domain, true,
+		site.OwnerUsername+" to "+newOwner.Username)
+
+	// Re-stamp the filesystem quota on both homes.
+	//
+	// XFS project quota is recorded on the inodes themselves, so a directory
+	// that moves keeps charging the account it came from: without this, the
+	// new owner's site would fill the old owner's allowance and the old
+	// owner could not get the space back by deleting anything they can see.
+	for _, u := range []*db.User{oldOwnerRow, newOwner} {
+		if u == nil {
+			continue
+		}
+		if err := s.plans.ApplyQuota(r.Context(), u); err != nil {
+			s.log.Warn("httpapi: could not re-apply the disk quota after a move",
+				"user", u.Username, "err", err)
+		}
+	}
+
+	// Databases keep their owner prefix in their names, so moving them would
+	// mean renaming every one and rewriting the application configuration
+	// that connects to them. They stay put, and the answer says so rather
+	// than letting somebody discover it later.
+	left, _ := s.db.ListDatabases(r.Context(), db.ScopeSelf(site.OwnerID))
+	names := make([]string, 0, len(left))
+	for _, d := range left {
+		names = append(names, d.Name)
+	}
+
+	out := map[string]any{"site": viewSite(updated)}
+	if len(names) > 0 {
+		out["databases_left_behind"] = names
+		out["note"] = "The website moved. Its databases still belong to " +
+			site.OwnerUsername + " and were not renamed."
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleSiteUpdate(w http.ResponseWriter, r *http.Request) {
 	site := s.loadSite(w, r)
 	if site == nil {

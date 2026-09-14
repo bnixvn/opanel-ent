@@ -102,6 +102,10 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/sites/{id}", s.handleSiteGet)
 			pr.Patch("/sites/{id}", s.handleSiteUpdate)
 			pr.Delete("/sites/{id}", s.handleSiteDelete)
+			// Moving a site between accounts moves its files, so it is a
+			// staff action and has its own endpoint.
+			pr.With(s.requireRole(auth.RoleReseller)).
+				Post("/sites/{id}/owner", s.handleSiteOwner)
 			pr.Get("/sites/{id}/wordpress", s.handleWordPressStatus)
 			pr.Post("/sites/{id}/wordpress", s.handleWordPressInstall)
 			pr.Get("/sites/{id}/certificate/reusable", s.handleCertReusable)

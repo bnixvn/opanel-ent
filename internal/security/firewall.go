@@ -59,12 +59,28 @@ func (s *Firewall) Status(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The ports the renderer always emits, reported so the interface can
+	// show them as open and explain why they have no delete button, rather
+	// than hiding the fact that they are open at all.
+	protected := make([]map[string]any, 0, len(s.sshPorts)+1)
+	for _, p := range s.sshPorts {
+		protected = append(protected, map[string]any{
+			"port": p, "protocol": "tcp", "reason": "SSH",
+		})
+	}
+	if s.panelPort > 0 {
+		protected = append(protected, map[string]any{
+			"port": s.panelPort, "protocol": "tcp", "reason": "the panel",
+		})
+	}
+
 	return map[string]any{
 		"active":          st.Active,
 		"pending_confirm": st.Pending,
 		"loaded_rules":    st.RuleCount,
 		"error":           st.Error,
 		"blocklist_size":  len(blocked),
+		"protected_ports": protected,
 	}, nil
 }
 

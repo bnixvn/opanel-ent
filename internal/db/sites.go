@@ -202,3 +202,15 @@ func (d *DB) UserLinuxHome(ctx context.Context, userID int64) (string, error) {
 	}
 	return home, err
 }
+
+// UpdateSiteOwner records a site's new owner and where its files now are.
+//
+// Separate from UpdateSite because it is the one change that also moves
+// bytes on disk: the caller has already relocated the directory, and this
+// records it. Keeping it apart makes the pairing obvious at every call site.
+func (d *DB) UpdateSiteOwner(ctx context.Context, siteID, ownerID int64, documentRoot string) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE sites SET owner_id = ?, document_root = ?, updated_at = ? WHERE id = ?`,
+		ownerID, documentRoot, fmtTime(time.Now()), siteID)
+	return err
+}

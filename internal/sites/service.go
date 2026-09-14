@@ -53,9 +53,10 @@ func New(database *db.DB, ac *agentclient.Client, cfg webserver.ServerConfig,
 
 // Errors callers are expected to branch on.
 var (
-	ErrDomainTaken   = errors.New("sites: domain already exists")
-	ErrOwnerNotFound = errors.New("sites: owner does not exist")
-	ErrPHPNotReady   = errors.New("sites: requested PHP version is not installed")
+	ErrDomainTaken      = errors.New("sites: domain already exists")
+	ErrOwnerNotFound    = errors.New("sites: owner does not exist")
+	ErrOwnerNotEligible = errors.New("sites: that account cannot own a website")
+	ErrPHPNotReady      = errors.New("sites: requested PHP version is not installed")
 )
 
 // CreateRequest describes a new site.
@@ -154,6 +155,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Site, erro
 		}
 	}
 
+	// A website lives inside its owner's home directory, so an owner who
+	// cannot have one cannot own a website. Said here, before anything is
+	// created, because the alternative was the agent refusing the name
+	// "admin" several steps later with a message that explained nothing.
+	if !linuxuser.ValidName(owner.Username) {
+		return nil, fmt.Errorf(
+			"%w: %q is a staff account with no home directory on the server. "+
+				"A website has to belong to a hosting account, because its files live "+
+				"in that account's home", ErrOwnerNotEligible, owner.Username)
+	}
 	if err := s.EnsureAccount(ctx, owner); err != nil {
 		return nil, err
 	}
@@ -469,6 +480,68 @@ func sameDestination(ctx context.Context, a, b string) bool {
 		}
 	}
 	return false
+}
+
+// ChangeOwner hands a website, and its files, to another account.
+//
+// The files move with it. A site is defined by the directory it is served
+// from, and that directory lives in its owner's home -- leaving the files
+// behind would give the new owner a site they cannot reach over SFTP and
+// leave the old owner paying quota for a site that is no longer theirs.
+func (s *Service) ChangeOwner(ctx context.Context, siteID, newOwnerID int64) (*db.Site, error) {
+	site, err := s.db.SiteByID(ctx, siteID)
+	if err != nil {
+		return nil, err
+	}
+	if site.OwnerID == newOwnerID {
+		return site, nil
+	}
+	newOwner, err := s.db.UserByID(ctx, newOwnerID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, ErrOwnerNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !linuxuser.ValidName(newOwner.Username) {
+		return nil, fmt.Errorf(
+			"%w: %q is a staff account with no home directory to move the site into",
+			ErrOwnerNotEligible, newOwner.Username)
+	}
+	// The receiving account has to be within its own package, or moving a
+	// site would be a way around the limit that creating one enforces.
+	if s.limits != nil {
+		if err := s.limits.CheckSite(ctx, newOwner.ID); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.EnsureAccount(ctx, newOwner); err != nil {
+		return nil, err
+	}
+
+	oldOwner := site.OwnerUsername
+	res, err := agentclient.Call[actions.SiteMoveResult](ctx, s.agent, "site.move", 1,
+		actions.SiteMoveRequest{Domain: site.Domain, From: oldOwner, To: newOwner.Username})
+	if err != nil {
+		return nil, err
+	}
+
+	site.OwnerID = newOwner.ID
+	site.DocumentRoot = res.DocumentRoot
+	if err := s.db.UpdateSiteOwner(ctx, site.ID, newOwner.ID, res.DocumentRoot); err != nil {
+		// The files are already in the new home. Saying so is the useful
+		// thing: the operator can fix the row, and moving them back
+		// automatically could fail the same way and leave nothing certain.
+		return nil, fmt.Errorf(
+			"the files were moved to %s but the panel could not record the new owner: %w",
+			res.VhostRoot, err)
+	}
+	if err := s.SyncWebserver(ctx); err != nil {
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	s.log.Info("sites: owner changed",
+		"domain", site.Domain, "from", oldOwner, "to", newOwner.Username, "files", res.Files)
+	return s.db.SiteByID(ctx, siteID)
 }
 
 // AttachCertificate points a site at a certificate that already exists on

@@ -70,9 +70,60 @@ export default function Firewall() {
       <RuleForm kind="port" busy={busy} onSubmit={change} />
 
       <Card title="Open ports">
-        {ports.length === 0 ? <Empty>Nothing extra is open.</Empty> : (
-          <RuleTable rows={ports} busy={busy} ask={ask} change={change} portish />
-        )}
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr><th>Port</th><th>Protocol</th><th>From</th><th>Note</th><th /></tr>
+            </thead>
+            <tbody>
+              {(status.protected_ports || []).map((p) => (
+                <tr key={`protected-${p.port}`}>
+                  <td><code>{p.port}</code></td>
+                  <td className="muted">{p.protocol}</td>
+                  <td className="muted">anywhere</td>
+                  <td className="muted">{p.reason}</td>
+                  <td className="right">
+                    <Tag kind="mute">always open</Tag>
+                  </td>
+                </tr>
+              ))}
+              {ports.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <code>{r.port_to > r.port_from ? `${r.port_from}-${r.port_to}` : r.port_from}</code>
+                  </td>
+                  <td className="muted">{r.protocol}</td>
+                  <td className="muted">{r.address || 'anywhere'}</td>
+                  <td className="muted">{r.comment}</td>
+                  <td className="right">
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy}
+                      onClick={async () => {
+                        const ok = await ask({
+                          title: `Close port ${r.port_from}?`,
+                          body: 'Whatever is listening on it stops being reachable from '
+                            + 'outside. The change reverts by itself if this page cannot '
+                            + 'confirm it afterwards.',
+                          confirmLabel: 'Close it',
+                          danger: true,
+                        });
+                        if (ok) change(() => api.del(`/firewall/rules/${r.id}`), 'Port closed');
+                      }}
+                    >
+                      Close
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
+          SSH and the panel have no Close button on purpose: closing them from
+          here is how an operator locks themselves out of their own server.
+        </p>
       </Card>
 
       <RuleForm kind="block" busy={busy} onSubmit={change} />

@@ -38,6 +38,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerCerts(r)
 	registerFirewall(r)
 	registerWAF(r)
+	registerSiteMove(r)
 	registerFiles(r)
 	registerBackup(r)
 	registerWordPress(r, deps)

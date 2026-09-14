@@ -115,8 +115,78 @@ export default function Sites({ me }) {
                         <div className="muted" style={{ fontSize: '.8em' }}>{s.aliases.join(', ')}</div>
                       )}
                     </td>
-                    {staff && <td>{s.owner}</td>}
-                    <td>{s.app_type}</td>
+                    {staff && (
+                      <td>
+                        <select
+                          value={s.owner_id}
+                          onChange={async (e) => {
+                            const to = owners.find((u) => u.id === Number(e.target.value));
+                            if (!to) return;
+                            const ok = await ask({
+                              title: `Move ${s.domain} to ${to.username}?`,
+                              body:
+                                `The website's files move with it, from `
+                                + `/home/${s.owner}/${s.domain} to /home/${to.username}/${s.domain}. `
+                                + 'The site keeps serving throughout.\n\n'
+                                + 'Databases are not moved: their names carry the owner as a '
+                                + 'prefix, so renaming them would break whatever connects to them.',
+                              confirmLabel: 'Move it',
+                            });
+                            if (!ok) { await load(); return; }
+                            msg.ok(`Moving ${s.domain}. A large site takes a moment.`);
+                            try {
+                              const res = await api.post(`/sites/${s.id}/owner`, {
+                                owner_id: to.id,
+                              });
+                              msg.ok(res.note
+                                ? `${s.domain} now belongs to ${to.username}. ${res.note}`
+                                : `${s.domain} now belongs to ${to.username}`);
+                            } catch (err) {
+                              msg.fail(err);
+                            }
+                            const rows = await load();
+                            loadWordPress(rows);
+                          }}
+                        >
+                          {owners.filter((u) => u.linux_uid).map((u) => (
+                            <option key={u.id} value={u.id}>{u.username}</option>
+                          ))}
+                          {!owners.some((u) => u.id === s.owner_id) && (
+                            <option value={s.owner_id}>{s.owner}</option>
+                          )}
+                        </select>
+                        <div className="muted" style={{ fontSize: '.75em' }}>
+                          <code>/home/{s.owner}/{s.domain}</code>
+                        </div>
+                      </td>
+                    )}
+                    <td>
+                      <select
+                        value={s.app_type}
+                        onChange={async (e) => {
+                          const to = e.target.value;
+                          const ok = await ask({
+                            title: `Change ${s.domain} to ${to}?`,
+                            body: to === 'static'
+                              ? 'A static site runs no PHP at all. Anything that '
+                                + 'depends on it stops working until you change back.'
+                              : 'This only changes how the webserver treats the site: '
+                                + 'the rewrite rules and whether PHP runs. No files are '
+                                + 'touched.',
+                            confirmLabel: 'Change it',
+                          });
+                          if (!ok) { await load(); return; }
+                          guard(
+                            () => api.patch(`/sites/${s.id}`, { app_type: to }),
+                            `${s.domain} is now ${to}`,
+                          );
+                        }}
+                      >
+                        <option value="wordpress">wordpress</option>
+                        <option value="php">php</option>
+                        <option value="static">static</option>
+                      </select>
+                    </td>
                     <td>
                       {s.app_type === 'static' ? (
                         <span className="muted">—</span>
@@ -297,9 +367,22 @@ function NewSite({ php, owners, staff, me, onDone }) {
   const [version, setVersion] = useState('');
   const [owner, setOwner] = useState('');
 
+  // Only accounts with a home directory can own a website, because that is
+  // where its files go. Staff accounts have none, so offering "me" to an
+  // administrator was offering a choice that always failed.
+  const eligible = owners.filter((u) => u.linux_uid);
+
   useEffect(() => {
     if (!version && php.length) setVersion(php[php.length - 1].version);
   }, [php, version]);
+
+  useEffect(() => {
+    if (staff && !owner && eligible.length) setOwner(String(eligible[0].id));
+  }, [staff, owner, eligible]);
+
+  const ownerName = staff
+    ? ((eligible.find((u) => String(u.id) === String(owner)) || {}).username || '')
+    : me.username;
 
   return (
     <Card title="New website">
@@ -309,7 +392,7 @@ function NewSite({ php, owners, staff, me, onDone }) {
           e.preventDefault();
           const body = { domain: domain.trim(), app_type: type };
           if (type !== 'static') body.php_version = version;
-          if (staff && owner) body.owner_id = Number(owner);
+          if (staff) body.owner_id = Number(owner);
           onDone(() => api.post('/sites', body), `Created ${body.domain}`);
           setDomain('');
         }}
@@ -327,11 +410,14 @@ function NewSite({ php, owners, staff, me, onDone }) {
         {staff && (
           <div className="field" style={{ flex: '0 0 11rem' }}>
             <label htmlFor="nsOwner">Owner</label>
-            <select id="nsOwner" value={owner} onChange={(e) => setOwner(e.target.value)}>
-              <option value="">{me.username} (me)</option>
-              {owners.filter((u) => u.linux_uid).map((u) => (
-                <option key={u.id} value={u.id}>{u.username}</option>
-              ))}
+            <select
+              id="nsOwner"
+              value={owner}
+              required
+              onChange={(e) => setOwner(e.target.value)}
+            >
+              {eligible.length === 0 && <option value="">no hosting accounts yet</option>}
+              {eligible.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
             </select>
           </div>
         )}
@@ -355,8 +441,25 @@ function NewSite({ php, owners, staff, me, onDone }) {
           </select>
         </div>
         <div>
-          <button type="submit" className="primary">Create</button>
+          <button
+            type="submit"
+            className="primary"
+            disabled={staff && eligible.length === 0}
+          >
+            Create
+          </button>
         </div>
+        <p className="muted" style={{ fontSize: '.83rem', flexBasis: '100%', margin: '.4rem 0 0' }}>
+          {staff && eligible.length === 0 ? (
+            <>Create a hosting account under Users first — a website&apos;s files
+              live in its owner&apos;s home directory, and staff accounts have none.</>
+          ) : (
+            <>
+              The files go in the owner&apos;s home directory:{' '}
+              <code>/home/{ownerName}/{domain.trim() || 'example.com'}/public_html</code>
+            </>
+          )}
+        </p>
       </form>
     </Card>
   );

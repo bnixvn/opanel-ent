@@ -92,9 +92,14 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"owner":   o.Username,
-		"path":    res.Path,
-		"entries": res.Entries,
+		"owner": o.Username,
+		"path":  res.Path,
+		// The absolute path, so the interface can show where these files
+		// actually are rather than only where they are relative to a home
+		// the reader cannot see.
+		"home":     o.Home,
+		"absolute": path.Join(o.Home, res.Path),
+		"entries":  res.Entries,
 	})
 }
 
