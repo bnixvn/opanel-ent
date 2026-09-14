@@ -87,6 +87,9 @@ func (s *Server) routes() http.Handler {
 		api.Post("/auth/login", s.handleLogin)
 		// The login page needs the brand before anyone has signed in.
 		api.Get("/branding", s.handleBranding)
+		// Called by the phpMyAdmin shim over the loopback address, which
+		// has no panel session. The one-time ticket is the credential.
+		api.Post("/internal/sso/redeem", s.handleSSORedeem)
 
 		// Authenticated.
 		api.Group(func(pr chi.Router) {
@@ -120,6 +123,9 @@ func (s *Server) routes() http.Handler {
 			// Databases. Ownership is enforced per request, like sites.
 			pr.Get("/databases", s.handleDatabaseList)
 			pr.Post("/databases", s.handleDatabaseCreate)
+			pr.Get("/databases/{id}/export", s.handleDatabaseExport)
+			pr.Get("/phpmyadmin", s.handlePMAStatus)
+			pr.Post("/phpmyadmin/signon", s.handlePMASignon)
 			pr.Delete("/databases/{id}", s.handleDatabaseDelete)
 			pr.Post("/databases/{id}/grants", s.handleGrant)
 			pr.Delete("/databases/{id}/grants/{userID}", s.handleRevoke)
@@ -218,6 +224,7 @@ func (s *Server) routes() http.Handler {
 				ar.Get("/waf/events", s.handleWAFEvents)
 				ar.Post("/sites/{id}/waf", s.handleSiteWAF)
 
+				ar.Post("/phpmyadmin/install", s.handlePMAInstall)
 				ar.Get("/certificates", s.handleCertList)
 				ar.Delete("/certificates", s.handleCertDelete)
 				ar.Get("/settings", s.handleSettings)
@@ -229,6 +236,13 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})
 		})
+	})
+
+	// phpMyAdmin, proxied to its loopback vhost. Behind the session check,
+	// so an unauthenticated request never reaches PHP at all.
+	r.Route("/phpmyadmin", func(pma chi.Router) {
+		pma.Use(s.authenticate)
+		pma.Handle("/*", s.pmaProxy())
 	})
 
 	// Everything outside /api is the user interface.
@@ -275,6 +289,7 @@ func (s *Server) StartBackgroundTasks(ctx context.Context) {
 	go s.renewCertificatesLoop(ctx)
 	go s.backupScheduleLoop(ctx)
 	go s.blocklistRefreshLoop(ctx)
+	go s.sweepSSOAccounts(ctx)
 }
 
 // blocklistRefreshLoop re-fetches the firewall's subscribed blocklists.

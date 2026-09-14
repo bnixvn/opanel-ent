@@ -203,6 +203,16 @@ type ServerConfig struct {
 	AdminEmail  string
 	// PanelManagedComment is written at the top of every generated file.
 	PanelManagedComment string
+	// PMARoot is where phpMyAdmin is installed, empty when it is not.
+	//
+	// It gets a vhost bound to the loopback address: the panel proxies to it
+	// after checking the session, so phpMyAdmin is never exposed directly,
+	// needs no hostname of its own and no certificate.
+	PMARoot string
+	// PMAPort is the loopback port that vhost listens on.
+	PMAPort int
+	// PMALSAPIBinary is the PHP interpreter it runs.
+	PMALSAPIBinary string
 	// WAFRulesFile is the ModSecurity configuration to load, empty when the
 	// engine or its rules are not installed.
 	//

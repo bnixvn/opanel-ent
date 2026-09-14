@@ -137,6 +137,11 @@ type mainView struct {
 	WAFAvailable bool
 	WAFRulesFile string
 
+	PMAEnabled     bool
+	PMARoot        string
+	PMAPort        int
+	PMALSAPIBinary string
+
 	ACMEVhostName     string
 	ACMEWebroot       string
 	ACMEConfigFileRel string
@@ -275,6 +280,9 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 	mv := mainView{
 		Config: cfg, Sites: views, SSLSites: sslViews, HasSSL: len(sslViews) > 0,
 		WAFAvailable: cfg.WAFRulesFile != "", WAFRulesFile: cfg.WAFRulesFile,
+		PMAEnabled: cfg.PMARoot != "" && cfg.PMAPort > 0 && cfg.PMALSAPIBinary != "",
+		PMARoot:    cfg.PMARoot, PMAPort: cfg.PMAPort,
+		PMALSAPIBinary:    cfg.PMALSAPIBinary,
 		ACMEVhostName:     webserver.ACMEVhostName,
 		ACMEWebroot:       webserver.ACMEWebroot,
 		ACMEConfigFileRel: b.configFileRel(b.acmeVhostConfPath()),

@@ -2,12 +2,16 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/databases"
@@ -163,6 +167,48 @@ func (s *Server) handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
 		"password": password,
 		"host":     databases.ConnectionHost,
 	})
+}
+
+// handleDatabaseExport streams a dump of one database to the browser.
+func (s *Server) handleDatabaseExport(w http.ResponseWriter, r *http.Request) {
+	_, rec := s.loadDatabase(w, r)
+	if rec == nil {
+		return
+	}
+	// Compressed unless asked otherwise: SQL text is about a tenth the size
+	// gzipped, and the difference is minutes on a slow connection.
+	compress := r.URL.Query().Get("compress") != "false"
+
+	staged, err := agentclient.Call[actions.FileStageResult](r.Context(), s.agent, "db.export", 1,
+		actions.DBExportRequest{Name: rec.Name, Compress: compress})
+	if err != nil {
+		s.audit(r, "database.export", rec.Name, false, err.Error())
+		writeError(w, http.StatusInternalServerError, "export_failed", trimAgent(err.Error()))
+		return
+	}
+	f, err := os.Open(staged.StagedPath)
+	if err != nil {
+		_ = os.Remove(staged.StagedPath)
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(staged.StagedPath)
+	}()
+
+	name := actions.ExportFileName(rec.Name, compress)
+	contentType := "application/sql"
+	if compress {
+		contentType = "application/gzip"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(staged.Size, 10))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+	s.audit(r, "database.export", rec.Name, true, name)
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("httpapi: database download interrupted", "database", rec.Name, "err", err)
+	}
 }
 
 func (s *Server) handleDatabaseDelete(w http.ResponseWriter, r *http.Request) {

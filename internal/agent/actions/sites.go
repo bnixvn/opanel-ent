@@ -311,6 +311,11 @@ func registerSites(r *agent.Registry, deps Deps) {
 		// wants; the host says what it actually has.
 		cfg := in.Config
 		cfg.WAFRulesFile = wafRulesIfInstalled()
+		if st := pmaStatus(); st.Installed {
+			cfg.PMARoot = st.Root
+			cfg.PMAPort = PMAPort
+			cfg.PMALSAPIBinary = deps.PHP.LSAPIBinary(PMAPHPVersion)
+		}
 
 		rendered, err := deps.Webserver.Render(cfg, sites)
 		if err != nil {

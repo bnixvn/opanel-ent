@@ -171,6 +171,60 @@ virtualHost {{ .ACMEVhostName }} {
     configFile                   {{ .ACMEConfigFileRel }}
 }
 
+{{ if .PMAEnabled -}}
+# phpMyAdmin, bound to the loopback address. The panel proxies to it once it
+# has checked the session, so it is not reachable from outside this machine
+# and needs neither a hostname nor a certificate of its own.
+virtualHost opanel_phpmyadmin {
+    vhRoot                       {{ .PMARoot }}
+    allowSymbolLink              0
+    enableScript                 1
+    restrained                   1
+    setUIDMode                   0
+
+    docRoot                      {{ .PMARoot }}
+    enableGzip                   1
+
+    index {
+        useServer                0
+        indexFiles               index.php
+    }
+
+    scripthandler {
+        add                      lsapi:opanel_pma_php php
+    }
+
+    extprocessor opanel_pma_php {
+        type                     lsapi
+        address                  uds://tmp/lshttpd/opanel_pma_php.sock
+        maxConns                 10
+        path                     {{ .PMALSAPIBinary }}
+        backlog                  20
+        instances                1
+        runOnStartUp             1
+        extMaxIdleTime           300
+        memSoftLimit             512M
+        memHardLimit             1024M
+    }
+
+    # Nothing here should be indexed or listed.
+    context /libraries {
+        location                 {{ .PMARoot }}/libraries
+        allowBrowse              0
+    }
+    context /templates {
+        location                 {{ .PMARoot }}/templates
+        allowBrowse              0
+    }
+}
+
+listener opanel_pma {
+    address                      127.0.0.1:{{ .PMAPort }}
+    secure                       0
+    map                          opanel_phpmyadmin *
+}
+
+{{ end -}}
 listener opanel_http {
     address                      *:{{ .Config.HTTPPort }}
     secure                       0

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, fmtBytes } from '../api.js';
+import { api, download, fmtBytes } from '../api.js';
 import { Card, Empty, Message, Search, Secret, matches, useConfirm, useMessage } from '../components.jsx';
 
 export default function Databases({ me }) {
@@ -8,6 +8,7 @@ export default function Databases({ me }) {
   const [owners, setOwners] = useState([]);
   const [query, setQuery] = useState('');
   const [secret, setSecret] = useState(null);
+  const [pma, setPma] = useState(null);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
 
@@ -25,8 +26,22 @@ export default function Databases({ me }) {
 
   useEffect(() => {
     load();
+    api.get('/phpmyadmin').then((r) => setPma(r.phpmyadmin)).catch(() => {});
     if (staff) api.get('/users').then((r) => setOwners(r.users || [])).catch(() => {});
   }, [load, staff]);
+
+  // The link is single-use and short-lived, so it is fetched at the moment
+  // the button is pressed rather than rendered into the page and left there.
+  async function openPhpMyAdmin(ownerName) {
+    msg.clear();
+    try {
+      const qs = ownerName ? `?owner=${encodeURIComponent(ownerName)}` : '';
+      const res = await api.post(`/phpmyadmin/signon${qs}`, {});
+      window.open(res.url, '_blank', 'noopener');
+    } catch (err) {
+      msg.fail(err);
+    }
+  }
 
   async function guard(fn, okText) {
     msg.clear();
@@ -49,6 +64,56 @@ export default function Databases({ me }) {
     <>
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
+
+      <Card title="phpMyAdmin">
+        {!pma ? null : pma.installed ? (
+          <div className="row" style={{ alignItems: 'center' }}>
+            <div>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => openPhpMyAdmin('')}
+              >
+                Open phpMyAdmin
+              </button>
+            </div>
+            {staff && owners.filter((u) => u.linux_uid).length > 0 && (
+              <div className="field" style={{ flex: '0 0 12rem' }}>
+                <label htmlFor="pmaOwner">as</label>
+                <select
+                  id="pmaOwner"
+                  onChange={(e) => e.target.value && openPhpMyAdmin(e.target.value)}
+                  defaultValue=""
+                >
+                  <option value="">pick an account…</option>
+                  {owners.filter((u) => u.linux_uid).map((u) => (
+                    <option key={u.id} value={u.username}>{u.username}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <p className="muted" style={{ flex: 1, fontSize: '.83rem', margin: 0 }}>
+              Opens with a throwaway database account that can reach only this
+              owner&apos;s databases and expires by itself. The panel never stores
+              your database password, so it cannot sign in as you.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+              Not installed. It is served through the panel on the loopback
+              address, so it needs no hostname, no certificate and no open port.
+            </p>
+            <button
+              type="button"
+              onClick={() => guard(() => api.post('/phpmyadmin/install', {}), 'phpMyAdmin installed')
+                .then(() => api.get('/phpmyadmin').then((r) => setPma(r.phpmyadmin)).catch(() => {}))}
+            >
+              Install phpMyAdmin
+            </button>
+          </>
+        )}
+      </Card>
 
       <Card title="New database">
         <NewDatabase staff={staff} owners={owners} me={me} onCreated={setSecret} onDone={guard} />
@@ -98,13 +163,10 @@ export default function Databases({ me }) {
                     <td className="right nowrap">
                       <button
                         type="button"
-                        onClick={() => api.raw(`/databases/${d.id}/export`)
-                          .then(() => {})
-                          .catch(() => {})}
-                        style={{ display: 'none' }}
+                        onClick={() => download(`/databases/${d.id}/export`)}
                       >
-                        Export
-                      </button>
+                        Download
+                      </button>{' '}
                       <button
                         type="button"
                         className="danger"
