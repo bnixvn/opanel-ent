@@ -95,11 +95,6 @@ export default function Import({ me }) {
       <Message value={msg.message} onClear={msg.clear} />
 
       <Card title="Import an account">
-        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-          Takes a cPanel <code>cpmove</code> archive or a DirectAdmin user
-          backup and recreates the websites, files and databases here. The
-          archive is read first and nothing is created until you say so.
-        </p>
         <form className="row" onSubmit={upload}>
           <div className="field">
             <label htmlFor="impFile">Backup archive</label>
@@ -174,10 +169,6 @@ export default function Import({ me }) {
                 {busy ? 'Importing — leave the page open…' : 'Import'}
               </button>
             </div>
-            <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.82rem' }}>
-              The account has to exist already. Creating one is its own
-              decision, with its own package and its own disk quota.
-            </p>
           </div>
         </Card>
       )}

@@ -78,12 +78,6 @@ export default function WordPressInstall({ domain, owner, value, onChange, embed
           />
         </div>
       </div>
-      <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.8rem' }}>
-        Anything left empty is filled in for you: the domain becomes the title,
-        the hosting account&apos;s name and email become the administrator, and
-        a password is generated and shown once. The panel keeps no copy it can
-        read back.
-      </p>
     </>
   );
 

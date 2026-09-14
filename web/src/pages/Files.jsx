@@ -619,8 +619,7 @@ export default function Files({ me }) {
             />
           </Suspense>
           <p className="muted" style={{ margin: '.5rem 0 0', fontSize: '.8rem' }}>
-            {fmtBytes(editing.size)} on disk. Ctrl-S saves, Ctrl-F searches,
-            Tab indents.
+            {fmtBytes(editing.size)} on disk.
           </p>
         </Card>
       )}

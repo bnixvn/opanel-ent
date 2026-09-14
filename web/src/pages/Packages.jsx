@@ -69,10 +69,6 @@ export default function Packages() {
           </div>
           <div><button type="submit" className="primary">Create package</button></div>
         </form>
-        <p className="muted" style={{ fontSize: '.83rem', margin: '.5rem 0 0' }}>
-          Zero means unlimited. Website and database limits are checked when
-          something is created; the disk limit is enforced by the filesystem.
-        </p>
       </Card>
 
       <Card title="Packages">

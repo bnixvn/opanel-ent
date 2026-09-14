@@ -27,6 +27,7 @@ type Deps struct {
 // RegisterAll wires every action into r.
 func RegisterAll(r *agent.Registry, deps Deps) {
 	registerCore(r)
+	registerSysStat(r)
 	registerSystemd(r)
 	registerPackages(r)
 	registerSites(r, deps)

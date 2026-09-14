@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, fmtDate } from '../api.js';
+import { api } from '../api.js';
 import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
 import WordPressInstall, { useWordPressInstall } from '../WordPressInstall.jsx';
 
@@ -343,10 +343,6 @@ export default function Sites({ me }) {
             </table>
           </div>
         )}
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          A subdomain is a website like any other: create <code>shop.example.com</code>
-          {' '}and it gets its own document root, PHP version and certificate.
-        </p>
       </Card>
     </>
   );
@@ -577,12 +573,9 @@ function InstallWordPressCard({ site, onDone, onCancel }) {
       actions={<button type="button" onClick={onCancel} disabled={busy}>Cancel</button>}
     >
       <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        This creates a database and a database account, downloads WordPress
-        and runs the installer. It takes a minute or two.
         {!site.ssl_enabled && (
-          <> This website has no certificate yet, so WordPress will be set up
-            on <code>http://{site.domain}</code>. Getting the certificate first
-            is easier than changing the address inside WordPress afterwards.</>
+          <>No certificate yet — WordPress will be set up on{' '}
+            <code>http://{site.domain}</code>.</>
         )}
       </p>
 

@@ -2,13 +2,13 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Card } from '../components.jsx';
 import { FEATURES } from '../features.js';
+import Icon from '../icons.jsx';
 
 // Dashboard is a way in, not a report.
 //
 // The numbers it used to restate all live on the pages that own them, and a
-// screen that only repeats them is a click in the way. What is useful on the
-// first screen is knowing what the panel can do, which on a control panel is
-// not obvious from a sidebar of eight words.
+// screen that only repeats them is a click in the way. What is left is the
+// shortest description of a control panel there is: what it can do.
 export default function Dashboard({ me }) {
   const role = me.role;
   const allowed = (item) => !item.roles || item.roles.includes(role);
@@ -23,8 +23,8 @@ export default function Dashboard({ me }) {
             <div className="tiles">
               {items.map((item) => (
                 <Link key={item.to} className="tile" to={item.to}>
-                  <strong>{item.label}</strong>
-                  <span>{item.desc}</span>
+                  <Icon name={item.icon} size={26} />
+                  <span>{item.label}</span>
                 </Link>
               ))}
             </div>

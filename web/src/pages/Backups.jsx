@@ -122,12 +122,6 @@ export default function Backups({ me }) {
             <button type="button" onClick={() => load()}>Refresh</button>
           </div>
         </div>
-        <p className="muted" style={{ margin: 0, fontSize: '.83rem' }}>
-          A backup holds the account&apos;s whole home directory and a dump of every
-          database it owns. Archives are kept outside the account, so a
-          compromised site cannot delete them, and they do not count against the
-          disk quota.
-        </p>
       </Card>
 
       <ScheduleCard schedule={schedule} ownerQ={ownerQ} onSaved={load} msg={msg} />

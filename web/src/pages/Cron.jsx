@@ -78,10 +78,6 @@ export default function Cron({ me }) {
                 {owners.map((u) => <option key={u.id}>{u.username}</option>)}
               </select>
             </div>
-            <p className="muted" style={{ flex: 1, alignSelf: 'center', margin: 0, fontSize: '.83rem' }}>
-              Jobs run as this Linux account, with its own permissions and its
-              own disk quota.
-            </p>
           </div>
         </Card>
       )}
@@ -171,13 +167,6 @@ export default function Cron({ me }) {
             </table>
           </div>
         )}
-        <p className="muted" style={{ fontSize: '.82rem', marginBottom: 0 }}>
-          Output is not emailed — this server has no mail transport, and cron
-          that cannot deliver logs a failure on every run. Redirect what you
-          want to keep, for example{' '}
-          <code>{'>> $HOME/logs/cron.log 2>&1'}</code>.
-          {jobs.length > 0 && data.max && <> Up to {data.max} jobs per account.</>}
-        </p>
       </Card>
     </>
   );

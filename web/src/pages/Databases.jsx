@@ -312,11 +312,6 @@ function NewDatabase({ staff, owners, me, onCreated, onDone }) {
       <div>
         <button type="submit" className="primary">Create database and account</button>
       </div>
-      <p className="muted" style={{ fontSize: '.83rem', flexBasis: '100%', margin: '.4rem 0 0' }}>
-        Your username is added as a prefix, so <code>shop</code> becomes{' '}
-        <code>{me.username}_shop</code>. A matching account with access to it is
-        created at the same time.
-      </p>
     </form>
   );
 }

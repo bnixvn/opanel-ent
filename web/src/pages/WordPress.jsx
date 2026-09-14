@@ -225,11 +225,6 @@ function Manage({ site, onClose, onChanged }) {
                 {busy === 'sign-in' ? 'Opening…' : 'Open wp-admin'}
               </button>
             </div>
-            <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.82rem' }}>
-              Signs in as <code>{info.admin_user || 'the administrator'}</code> with a
-              link that works once and expires in two minutes. The panel has no
-              copy of the WordPress password and never changes it.
-            </p>
           </div>
 
           <dl className="kv">

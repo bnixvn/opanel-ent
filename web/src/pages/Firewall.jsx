@@ -59,12 +59,6 @@ export default function Firewall() {
           <dt>Open ports</dt><dd>{status.loaded_rules ?? ports.length}</dd>
           <dt>Blocked addresses</dt><dd>{status.blocklist_size ?? 0} from subscriptions</dd>
         </dl>
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          SSH and the panel&apos;s own port are always open and cannot be closed
-          from here. Every change reverts by itself after two minutes unless
-          this page confirms it worked — which is what stops a firewall change
-          locking you out for good.
-        </p>
       </Card>
 
       <RuleForm kind="port" busy={busy} onSubmit={change} />
@@ -120,10 +114,6 @@ export default function Firewall() {
             </tbody>
           </table>
         </div>
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          SSH and the panel have no Close button on purpose: closing them from
-          here is how an operator locks themselves out of their own server.
-        </p>
       </Card>
 
       <RuleForm kind="block" busy={busy} onSubmit={change} />
@@ -140,10 +130,6 @@ export default function Firewall() {
         {allows.length === 0 ? <Empty>No exceptions.</Empty> : (
           <RuleTable rows={allows} busy={busy} ask={ask} change={change} />
         )}
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          Checked before the blocklists, so your own office address is not caught
-          by a feed you subscribed to.
-        </p>
       </Card>
 
       <Sources sources={data.sources} busy={busy} msg={msg} reload={load} ask={ask} />
@@ -378,11 +364,6 @@ function Sources({ sources, busy, msg, reload, ask }) {
           </table>
         </div>
       )}
-      <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-        One address or range per line; <code>#</code> comments are ignored.
-        Refetched on each list&apos;s own schedule. A list that has been failing
-        is shown here rather than quietly leaving you unprotected.
-      </p>
     </Card>
   );
 }

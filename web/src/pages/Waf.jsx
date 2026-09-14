@@ -3,9 +3,9 @@ import { api } from '../api.js';
 import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
 const MODES = [
-  { id: 'detect', label: 'Log only', hint: 'Records what would have been blocked and lets it through. Start here.' },
-  { id: 'block', label: 'Block', hint: 'Refuses matching requests. Watch the log first.' },
-  { id: 'off', label: 'Off', hint: 'The engine does nothing.' },
+  { id: 'detect', label: 'Log only' },
+  { id: 'block', label: 'Block' },
+  { id: 'off', label: 'Off' },
 ];
 
 export default function Waf() {
@@ -129,24 +129,11 @@ export default function Waf() {
             </div>
             <div><button type="submit" className="primary" disabled={busy}>Save</button></div>
           </form>
-          <p className="muted" style={{ fontSize: '.83rem', margin: '.5rem 0 0' }}>
-            {MODES.find((m) => m.id === mode).hint}{' '}
-            The OWASP rules block ordinary WordPress traffic often enough that
-            going straight to blocking is how a host spends its first day
-            answering tickets. Watch the log below, switch off the rule ids that
-            fire on real requests, then turn blocking on.
-          </p>
         </Card>
       )}
 
       {waf.rules_installed && rules.length > 0 && (
         <Card title="Rule set">
-          <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-            The OWASP Core Rule Set, by category. Switching one off applies to
-            every website — it is the thing to reach for when a category fires
-            on ordinary traffic and a single rule id is not enough. Saving the
-            mode above applies these too.
-          </p>
           <div className="scroll">
             <table>
               <thead>
@@ -183,19 +170,10 @@ export default function Waf() {
               </tbody>
             </table>
           </div>
-          <p className="muted" style={{ fontSize: '.82rem', marginBottom: 0 }}>
-            The categories marked &ldquo;needed&rdquo; are initialisation and
-            scoring. Switching one of those off does not relax the rules, it
-            stops them working, so they are not offered as a choice.
-          </p>
         </Card>
       )}
 
       <Card title="Websites">
-        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-          Each website decides for itself whether the engine runs at all. The
-          rule set and the mode above are shared; this is the switch.
-        </p>
         {data.sites.length === 0 ? <Empty>No websites yet.</Empty> : (
           <div className="scroll">
             <table>

@@ -21,6 +21,7 @@ import System from './pages/System.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import StatusRail from './StatusRail.jsx';
 import { FEATURES } from './features.js';
 
 
@@ -184,50 +185,53 @@ export default function App() {
           </details>
         </header>
 
-        <main className="content">
-          <Routes>
-            {/* The dashboard is a way in, not a report: it lists what the
-                panel can do, grouped the way the sidebar is. The numbers it
-                used to restate are on the pages that own them. */}
-            <Route path="/" element={<Dashboard me={me} />} />
-            <Route path="/sites" element={<Sites me={me} />} />
-            <Route path="/sites/*" element={<Sites me={me} />} />
-            <Route path="/databases" element={<Databases me={me} />} />
-            <Route path="/wordpress" element={<WordPress me={me} />} />
-            <Route path="/security/malware" element={<Malware me={me} />} />
-            <Route path="/cron" element={<Cron me={me} />} />
-            <Route path="/files" element={<Files me={me} />} />
-            <Route path="/backups" element={<Backups me={me} />} />
-            <Route path="/ssl" element={<Ssl me={me} />} />
-            <Route path="/logs" element={<Logs />} />
-            <Route path="/account" element={<Account me={me} onChanged={setMe} />} />
-            {(role === 'admin' || role === 'reseller') && (
-              <>
-                <Route
-                  path="/users"
-                  element={(
-                    <Users
-                      me={me}
-                      onImpersonated={(u) => { setMe({ ...u, impersonated: true, impersonated_by: me.username }); navigate('/'); }}
-                    />
-                  )}
-                />
-                <Route path="/packages" element={<Packages me={me} />} />
-                <Route path="/import" element={<Import me={me} />} />
-              </>
-            )}
-            {role === 'admin' && (
-              <>
-                <Route path="/security/firewall" element={<Firewall />} />
-                <Route path="/security/waf" element={<Waf />} />
-                <Route path="/php" element={<Php me={me} />} />
-                <Route path="/system" element={<System />} />
-                <Route path="/settings" element={<Settings />} />
-              </>
-            )}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
+        <div className="body">
+          <main className="content">
+            <Routes>
+              {/* The dashboard is a way in, not a report: it lists what the
+                  panel can do, grouped the way the sidebar is. The numbers it
+                  used to restate are on the pages that own them. */}
+              <Route path="/" element={<Dashboard me={me} />} />
+              <Route path="/sites" element={<Sites me={me} />} />
+              <Route path="/sites/*" element={<Sites me={me} />} />
+              <Route path="/databases" element={<Databases me={me} />} />
+              <Route path="/wordpress" element={<WordPress me={me} />} />
+              <Route path="/security/malware" element={<Malware me={me} />} />
+              <Route path="/cron" element={<Cron me={me} />} />
+              <Route path="/files" element={<Files me={me} />} />
+              <Route path="/backups" element={<Backups me={me} />} />
+              <Route path="/ssl" element={<Ssl me={me} />} />
+              <Route path="/logs" element={<Logs />} />
+              <Route path="/account" element={<Account me={me} onChanged={setMe} />} />
+              {(role === 'admin' || role === 'reseller') && (
+                <>
+                  <Route
+                    path="/users"
+                    element={(
+                      <Users
+                        me={me}
+                        onImpersonated={(u) => { setMe({ ...u, impersonated: true, impersonated_by: me.username }); navigate('/'); }}
+                      />
+                    )}
+                  />
+                  <Route path="/packages" element={<Packages me={me} />} />
+                  <Route path="/import" element={<Import me={me} />} />
+                </>
+              )}
+              {role === 'admin' && (
+                <>
+                  <Route path="/security/firewall" element={<Firewall />} />
+                  <Route path="/security/waf" element={<Waf />} />
+                  <Route path="/php" element={<Php me={me} />} />
+                  <Route path="/system" element={<System />} />
+                  <Route path="/settings" element={<Settings />} />
+                </>
+              )}
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </main>
+          <StatusRail me={me} />
+        </div>
       </div>
     </div>
   );

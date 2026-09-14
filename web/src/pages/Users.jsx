@@ -295,10 +295,6 @@ function NewUser({ isAdmin, plans, onDone, onCreated }) {
         </div>
         <div><button type="submit" className="primary">Create</button></div>
       </form>
-      <p className="muted" style={{ fontSize: '.83rem', margin: '.5rem 0 0' }}>
-        An end user gets a Linux account, a home directory and SFTP access.
-        Staff accounts do not.
-      </p>
     </Card>
   );
 }
@@ -369,8 +365,7 @@ function ResellerLimits({ user, onClose, onSaved, onError }) {
       {used && (
         <p className="muted" style={{ fontSize: '.83rem', margin: '.6rem 0 0' }}>
           Already handed out: {used.accounts} account(s), {used.sites} website(s),{' '}
-          {used.databases} database(s), {used.disk_quota_mb} MB promised. Zero means
-          no limit. Disk counts what has been promised, not what is in use.
+          {used.databases} database(s), {used.disk_quota_mb} MB promised.
         </p>
       )}
     </Card>

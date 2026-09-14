@@ -37,13 +37,6 @@ export default function Destinations({ me }) {
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
 
-      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        Every finished backup is copied to these. A backup that only exists on
-        this server is not a backup of this server. The panel stores the
-        address and never the password — that lives in a root-only file, so a
-        copy of the panel&apos;s database is not a copy of your storage
-        credentials.
-      </p>
 
       {rows.length === 0 ? (
         <Empty>Backups are kept on this server only.</Empty>
@@ -296,10 +289,6 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
           {busy ? 'Connecting…' : 'Add and test'}
         </button>{' '}
         <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>{' '}
-        <span className="muted" style={{ fontSize: '.8rem' }}>
-          The panel writes and removes a test file before keeping this, so a
-          destination that was never reachable is never saved.
-        </span>
       </p>
     </form>
   );

@@ -35,12 +35,6 @@ export default function Account({ me, onChanged }) {
       <Passkeys msg={msg} />
 
       <Card title="Contact email">
-        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-          Where the certificate authority sends the warning before one of your
-          certificates expires. Changing it needs your password, because
-          somebody who could change it from an unlocked browser could take the
-          account over quietly.
-        </p>
         <form
           className="row"
           onSubmit={async (e) => {
@@ -130,10 +124,6 @@ export default function Account({ me, onChanged }) {
       <Card title="Two-factor authentication">
         {me.totp_enabled ? (
           <>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Two-factor is on. Turning it off means a stolen password is enough
-              to reach this account.
-            </p>
             <form
               className="row"
               onSubmit={async (e) => {
@@ -174,10 +164,6 @@ export default function Account({ me, onChanged }) {
               </button>
             ) : (
               <>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Add this secret to an authenticator app, then enter the code it
-                  shows to finish.
-                </p>
                 <Secret label="Secret" value={totp.secret} />
                 {totp.uri && (
                   <p className="muted" style={{ fontSize: '.8rem', wordBreak: 'break-all' }}>
@@ -210,10 +196,6 @@ export default function Account({ me, onChanged }) {
             )}
             {recovery.length > 0 && (
               <div style={{ marginTop: '1rem' }}>
-                <p className="muted" style={{ fontSize: '.85rem' }}>
-                  Recovery codes, each usable once. Save them somewhere other than
-                  the device with the authenticator on it.
-                </p>
                 <code style={{ display: 'block', whiteSpace: 'pre-wrap' }}>
                   {recovery.join('\n')}
                 </code>
@@ -287,10 +269,6 @@ function NotificationForm({ current, msg, onSaved }) {
         </select>
       </div>
       <div><button type="submit" className="primary">Save</button></div>
-      <p className="muted" style={{ fontSize: '.83rem', flexBasis: '100%', margin: '.4rem 0 0' }}>
-        Sent when a backup fails, a disk fills, a certificate cannot be renewed
-        or malware is found. The token is never shown again once saved.
-      </p>
     </form>
   );
 }
@@ -344,12 +322,6 @@ function Passkeys({ msg }) {
 
   return (
     <Card title="Passkeys">
-      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        Used as your second step after the password, in place of a
-        two-factor code. The key never leaves your phone, laptop or security
-        key, and it only works at <code>{state.origin}</code> — so a copy of
-        this login page on another address cannot ask for it.
-      </p>
 
       {keys.length === 0 ? (
         <Empty>No passkeys on this account yet.</Empty>

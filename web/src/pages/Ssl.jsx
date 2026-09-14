@@ -7,10 +7,10 @@ import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components
 // everything, a wildcard the server already holds, or a certificate they
 // bought.
 const METHODS = [
-  { id: 'le', label: "Let's Encrypt", hint: 'Free, automatic, renewed by the panel. The domain must already point here.' },
-  { id: 'wildcard', label: 'Wildcard (Cloudflare)', hint: 'Covers every subdomain. Needs a Cloudflare API token for the zone.' },
-  { id: 'reuse', label: 'Reuse a certificate', hint: 'Use one this server already holds that covers this name.' },
-  { id: 'manual', label: 'Upload a certificate', hint: 'Paste a certificate you bought elsewhere.' },
+  { id: 'le', label: "Let's Encrypt" },
+  { id: 'wildcard', label: 'Wildcard (Cloudflare)' },
+  { id: 'reuse', label: 'Reuse a certificate' },
+  { id: 'manual', label: 'Upload a certificate' },
 ];
 
 export default function Ssl({ me }) {
@@ -141,9 +141,6 @@ export default function Ssl({ me }) {
                 ))}
               </select>
             </div>
-            <p className="muted" style={{ flex: 1, alignSelf: 'center', fontSize: '.85rem' }}>
-              {METHODS.find((m) => m.id === method).hint}
-            </p>
             <div><button type="button" onClick={() => setSelected(null)}>Close</button></div>
           </div>
 
@@ -203,10 +200,6 @@ export default function Ssl({ me }) {
               </table>
             </div>
           )}
-          <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-            Uploaded certificates are never renewed automatically — the panel has
-            no way to get a replacement for one you bought.
-          </p>
         </Card>
       )}
     </>
@@ -234,12 +227,6 @@ function LetsEncrypt({ site, busy, run }) {
         );
       }}
     >
-      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        The certificate authority fetches a file over plain HTTP to check that
-        you control the name, so <code>{site.domain}</code> has to point at this
-        server already. <code>www.{site.domain}</code> is added automatically when
-        its DNS sends visitors to the same place.
-      </p>
       <ForceHTTPS value={force} onChange={setForce} />
       <p style={{ marginBottom: 0 }}>
         <button type="submit" className="primary" disabled={busy}>
@@ -287,12 +274,6 @@ function Wildcard({ site, busy, run }) {
           />
         </div>
       </div>
-      <p className="muted" style={{ fontSize: '.85rem' }}>
-        Covers <code>{domain}</code> and <code>*.{domain}</code>. Create the token in
-        Cloudflare with <strong>Zone → DNS → Edit</strong> on this zone only. The panel
-        uses it for this request and does not store it, so renewal of a wildcard
-        has to be done here again.
-      </p>
       <ForceHTTPS value={force} onChange={setForce} />
       <p style={{ marginBottom: 0 }}>
         <button type="submit" className="primary" disabled={busy}>
@@ -321,10 +302,6 @@ function Reuse({ site, cert, busy, run }) {
         <dt>Covers</dt><dd className="muted">{(cert.domains || []).join(', ')}</dd>
         <dt>Expires</dt><dd className="muted">{fmtDate(cert.not_after)}</dd>
       </dl>
-      <p className="muted" style={{ fontSize: '.85rem' }}>
-        No new order, so this does not touch the rate limit and works
-        immediately.
-      </p>
       <ForceHTTPS value={force} onChange={setForce} />
       <p style={{ marginBottom: 0 }}>
         <button type="submit" className="primary" disabled={busy}>Use this certificate</button>
@@ -368,12 +345,6 @@ function Manual({ site, busy, run }) {
       {area('Certificate (PEM)', cert, setCert, true)}
       {area('Private key (PEM)', key, setKey, true)}
       {area('CA bundle (PEM, optional)', chain, setChain, false)}
-      <p className="muted" style={{ fontSize: '.85rem' }}>
-        Checked before anything is written: that the key matches the
-        certificate, that it has not expired, and that it covers{' '}
-        <code>{site.domain}</code>. A certificate that fails any of those would
-        stop the webserver reloading, so it is refused here instead.
-      </p>
       <ForceHTTPS value={force} onChange={setForce} />
       <p style={{ marginBottom: 0 }}>
         <button type="submit" className="primary" disabled={busy}>Install certificate</button>

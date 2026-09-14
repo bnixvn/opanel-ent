@@ -117,16 +117,6 @@ export default function Php({ me }) {
             </table>
           </div>
         )}
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          Each website chooses its version on the Websites page. Installing one
-          here makes it available to choose; Settings changes the php.ini every
-          website on that version runs under.
-        </p>
-        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          ionCube decodes commercially licensed PHP. It is installed with each
-          version when the repository carries it; software that needs it will
-          not run at all without it.
-        </p>
       </Card>
 
       {tuning && (
@@ -174,12 +164,6 @@ function VersionSettings({ version, canEdit, onClose }) {
 
       {!data ? <p className="muted">Loading…</p> : (
         <>
-          <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-            These apply to every website running PHP {version}. Leave a field
-            empty to use PHP&apos;s own default. Saving rewrites the
-            interpreter&apos;s configuration and reloads the webserver, so
-            every site on this version is affected at once.
-          </p>
 
           <PhpDirectives
             directives={data.directives || []}
@@ -219,12 +203,6 @@ function VersionSettings({ version, canEdit, onClose }) {
                 Clear all
               </button>
             </div>
-            {!canEdit && (
-              <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.8rem' }}>
-                Only an administrator can change these — one change lands on
-                every website using this version.
-              </p>
-            )}
           </div>
         </>
       )}
@@ -256,11 +234,6 @@ function Overrides({ version, canEdit, msg }) {
     <div style={{ marginTop: '1rem' }}>
       <p style={{ margin: '0 0 .3rem', fontWeight: 600, fontSize: '.9rem' }}>
         Not following these settings
-      </p>
-      <p className="muted" style={{ margin: '0 0 .5rem', fontSize: '.82rem' }}>
-        These websites have their own values, set before settings moved here.
-        Their own values win, so a change above will not reach them until the
-        override is removed.
       </p>
       <div className="scroll">
         <table>

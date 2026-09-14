@@ -9,6 +9,7 @@
   --line: #e3e6ea;
   --accent: #2563eb;
   --accent-ink: #fff;
+  --accent-soft: #eef3fe;
   --ok: #0f7b45;
   --ok-bg: #e6f4ec;
   --warn: #8a5a00;
@@ -30,6 +31,7 @@
     --muted: #9aa3af;
     --line: #262b33;
     --accent: #4b83f0;
+    --accent-soft: #1a2436;
     --ok: #5cc38f;
     --ok-bg: #12291f;
     --warn: #e0b060;
@@ -233,19 +235,100 @@ a { color: var(--accent); }
   grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
   gap: 0.7rem;
 }
+.tiles {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+}
 .tile {
-  display: block;
-  padding: 0.8rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0.5rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
   color: var(--ink);
   text-decoration: none;
+  text-align: center;
 }
-.tile:hover { border-color: var(--accent); }
-.tile strong { display: block; font-size: 0.93rem; font-weight: 600; }
-.tile span { display: block; margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted); }
-.content { padding: 1.2rem; max-width: 80rem; }
+.tile:hover { border-color: var(--accent); background: var(--accent-soft); }
+.tile:hover .icon { color: var(--accent); }
+.tile .icon { color: var(--muted); transition: color 0.12s; }
+.tile span { font-size: 0.84rem; font-weight: 500; line-height: 1.2; }
+
+/* ---------- the status rail ---------- */
+
+.body { display: flex; align-items: flex-start; }
+.content { padding: 1.2rem; max-width: 80rem; flex: 1; min-width: 0; }
+.rail {
+  flex: 0 0 15rem;
+  width: 15rem;
+  padding: 1.2rem 1.2rem 1.2rem 0;
+  position: sticky;
+  top: 3.1rem;
+}
+.rail section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.85rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.rail h2 {
+  margin: 0 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.railnote { margin: 0.4rem 0 0; font-size: 0.75rem; color: var(--muted); }
+.railfacts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0.7rem 0 0;
+  font-size: 0.78rem;
+}
+.railfacts dt { color: var(--muted); }
+.railfacts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+.meter + .meter { margin-top: 0.6rem; }
+.meterhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  margin-bottom: 0.25rem;
+}
+.meterhead span:first-child { color: var(--muted); }
+.meterhead span:last-child { font-variant-numeric: tabular-nums; }
+.meterbar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.meterbar span { display: block; height: 100%; transition: width 0.4s ease; }
+.meterbar span.ok { background: var(--accent); }
+.meterbar span.warn { background: #d97706; }
+.meterbar span.bad { background: var(--bad); }
+
+/* Below this the rail would squeeze the page it is meant to annotate, so it
+   goes under the content instead of beside it. */
+@media (max-width: 1100px) {
+  .body { flex-direction: column; }
+  .rail {
+    position: static;
+    flex: none;
+    width: 100%;
+    max-width: 80rem;
+    padding: 0 1.2rem 1.2rem;
+  }
+}
 
 /* ---------- cards, tables, forms ---------- */
 

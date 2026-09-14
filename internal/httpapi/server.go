@@ -242,6 +242,10 @@ func (s *Server) routes() http.Handler {
 				rr.Use(s.requireRole(auth.RoleReseller))
 				// Importing an account creates websites and databases for
 				// somebody else, so it is not a customer's button.
+				// How busy the machine is. Staff only: on a shared server
+				// the load is largely made of other tenants' traffic, and
+				// a customer has no business reading it.
+				rr.Get("/system/stats", s.handleSystemStats)
 				rr.Post("/import/upload", s.handleImportUpload)
 				rr.Post("/import/run", s.handleImportRun)
 				rr.Delete("/import", s.handleImportDiscard)

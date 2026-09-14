@@ -164,3 +164,17 @@ func (s *Server) agentError(w http.ResponseWriter, err error) {
 func asAgentError(err error, target **agentclient.Error) bool {
 	return errors.As(err, target)
 }
+
+// handleSystemStats reports what the machine is doing right now.
+//
+// Sampled per request rather than kept in a ring buffer: this feeds a status
+// panel that polls, and a panel that stores a history of its own host is a
+// monitoring system, which this is not.
+func (s *Server) handleSystemStats(w http.ResponseWriter, r *http.Request) {
+	st, err := agentclient.Call[actions.SysStatResult](r.Context(), s.agent, "sysstat", 1, struct{}{})
+	if err != nil {
+		s.agentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}

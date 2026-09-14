@@ -25,12 +25,6 @@ function PasskeySwitch({ msg }) {
 
   return (
     <Card title="Passkeys">
-      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        A passkey replaces the two-factor code: after the password, the
-        account holder confirms with their phone, laptop or security key. It
-        cannot be phished or reused from somebody else&apos;s breach, because
-        the signature is bound to this server&apos;s own address.
-      </p>
 
       {state.ready ? (
         <>
@@ -56,9 +50,7 @@ function PasskeySwitch({ msg }) {
             </div>
             <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.83rem' }}>
               Passkeys will be bound to <code>{state.hostname}</code> and will
-              only work at <code>{state.origin}</code>. Changing the
-              panel&apos;s hostname later makes every registered key unusable,
-              so pick the address people will keep using.
+              only work at <code>{state.origin}</code>.
             </p>
           </div>
           <p style={{ marginBottom: 0 }}>
@@ -173,11 +165,6 @@ export default function Settings() {
       <PasskeySwitch msg={msg} />
 
       <Card title="Panel addresses">
-        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-          The panel answers on these names only. Without this list, anybody who
-          points a domain at this server could put a login page for your panel
-          on their own address.
-        </p>
         {(data.hostnames || []).length === 0 ? (
           <Empty>Only the address you are using now.</Empty>
         ) : (
@@ -332,8 +319,7 @@ function Branding({ branding, msg, onSaved }) {
           <img src={favicon || branding.favicon} alt="favicon" style={{ height: '1.2rem' }} />
         )}
         <span className="muted" style={{ fontSize: '.83rem' }}>
-          PNG, JPEG, WebP or GIF, under 256 KB. SVG is refused because it can
-          carry script and would run inside the panel.
+          PNG, JPEG, WebP or GIF, under 256 KB.
         </span>
       </div>
     </Card>
