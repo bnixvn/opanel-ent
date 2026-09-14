@@ -49,6 +49,10 @@ type WAFConfigureRequest struct {
 	// ExcludedRules are OWASP rule ids to switch off server-wide, for the
 	// ones that break a common application.
 	ExcludedRules []string `json:"excluded_rules,omitempty"`
+	// DisabledFiles are whole rule categories to leave out, by filename.
+	// Sent every time: the list is the complete set, so a category left out
+	// of it is switched back on.
+	DisabledFiles []string `json:"disabled_files,omitempty"`
 }
 
 // Validate checks the mode and the rule ids.
@@ -57,6 +61,11 @@ func (r *WAFConfigureRequest) Validate() error {
 	case WAFOff, WAFDetectOnly, WAFBlock:
 	default:
 		return fmt.Errorf("mode must be %q, %q or %q", WAFOff, WAFDetectOnly, WAFBlock)
+	}
+	for _, name := range r.DisabledFiles {
+		if err := validDisabledRuleName(name); err != nil {
+			return err
+		}
 	}
 	for _, id := range r.ExcludedRules {
 		// Rule ids reach a configuration file the webserver parses, so only
@@ -190,6 +199,11 @@ func writeWAFConfig(in WAFConfigureRequest) error {
 	if err := os.MkdirAll(wafDir, 0o755); err != nil {
 		return err
 	}
+	// Written before the rules are rendered: wafIncludeLines reads this to
+	// decide which files to include.
+	if err := writeDisabledWAFRules(in.DisabledFiles); err != nil {
+		return err
+	}
 	engine := "DetectionOnly"
 	switch in.Mode {
 	case WAFBlock:
@@ -219,7 +233,7 @@ func writeWAFConfig(in WAFConfigureRequest) error {
 	if _, err := os.Stat(filepath.Join(wafDir, "crs-setup.conf")); err == nil {
 		fmt.Fprintf(&b, "Include %s/crs-setup.conf\n", wafDir)
 	}
-	fmt.Fprintf(&b, "Include %s/rules/*.conf\n", wafDir)
+	b.WriteString(wafIncludeLines())
 
 	if len(in.ExcludedRules) > 0 {
 		b.WriteString("\n# Rules an operator switched off after a false positive.\n")

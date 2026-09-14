@@ -26,10 +26,10 @@ function PasskeySwitch({ msg }) {
   return (
     <Card title="Passkeys">
       <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        A passkey is a key held by a phone or a security key. It cannot be
-        phished, reused from somebody else&apos;s breach, or typed into a copy
-        of this login page — the signature is bound to this server&apos;s own
-        address.
+        A passkey replaces the two-factor code: after the password, the
+        account holder confirms with their phone, laptop or security key. It
+        cannot be phished or reused from somebody else&apos;s breach, because
+        the signature is bound to this server&apos;s own address.
       </p>
 
       {state.ready ? (
@@ -45,7 +45,7 @@ function PasskeySwitch({ msg }) {
                     setState(res.state);
                     msg.ok(res.state.enabled
                       ? 'Passkeys are on. Everyone can add one from their Account page.'
-                      : 'Passkeys are off. Registered keys are kept but cannot be used to sign in.');
+                      : 'Passkeys are off. Registered keys are kept but will not be asked for.');
                   } catch (err) {
                     msg.fail(err);
                   }

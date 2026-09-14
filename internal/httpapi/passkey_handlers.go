@@ -128,9 +128,13 @@ func (s *Server) handlePasskeyRegisterStart(w http.ResponseWriter, r *http.Reque
 		// Excluding what is already registered stops the same phone being
 		// added twice and shows the customer a useful message instead.
 		webauthn.WithExclusions(credentialDescriptors(keys)),
-		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementPreferred),
+		// Not a discoverable credential: this is a second factor, asked for
+		// by an account the server has already identified, so there is
+		// nothing for the authenticator to look up. Asking for one anyway
+		// consumes a slot on a security key that has only a handful.
+		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementDiscouraged),
 		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
-			ResidentKey:      protocol.ResidentKeyRequirementPreferred,
+			ResidentKey:      protocol.ResidentKeyRequirementDiscouraged,
 			UserVerification: protocol.VerificationPreferred,
 		}),
 	)
@@ -223,114 +227,6 @@ func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 
 // --- sign-in --------------------------------------------------------------
 
-// handlePasskeyLoginStart begins a sign-in. Unauthenticated by necessity.
-func (s *Server) handlePasskeyLoginStart(w http.ResponseWriter, r *http.Request) {
-	wa, err := s.webauthnFor(r.Context())
-	if err != nil {
-		writeError(w, http.StatusConflict, "not_ready",
-			"passkeys are not switched on for this server")
-		return
-	}
-	// Discoverable credentials: the browser offers whichever passkey matches
-	// this site and the account comes back with the assertion. Asking for a
-	// username first would tell anybody who asked which usernames exist.
-	options, session, err := wa.BeginDiscoverableLogin(
-		webauthn.WithUserVerification(protocol.VerificationPreferred))
-	if err != nil {
-		s.log.Error("httpapi: begin passkey login", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "could not start sign-in")
-		return
-	}
-	id, err := s.storeChallenge(r.Context(), 0, "login", session)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"challenge_id": id, "options": options})
-}
-
-func (s *Server) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
-	wa, err := s.webauthnFor(r.Context())
-	if err != nil {
-		writeError(w, http.StatusConflict, "not_ready",
-			"passkeys are not switched on for this server")
-		return
-	}
-	ip := clientIP(r)
-	if ok, retryIn := s.loginLimiter.Allow(ip); !ok {
-		w.Header().Set("Retry-After", itoa(int(retryIn.Seconds())+1))
-		writeError(w, http.StatusTooManyRequests, "rate_limited",
-			"too many attempts, try again shortly")
-		return
-	}
-
-	var req struct {
-		ChallengeID string          `json:"challenge_id"`
-		Credential  json.RawMessage `json:"credential"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	session, ok := s.takeChallenge(w, r, req.ChallengeID, "login")
-	if !ok {
-		return
-	}
-	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(req.Credential))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "the authenticator's reply was unusable")
-		return
-	}
-
-	// The account is whichever one the credential belongs to. The library
-	// hands the handle back and this looks it up; it never trusts a name
-	// sent alongside the assertion.
-	var account *db.User
-	cred, err := wa.ValidateDiscoverableLogin(
-		func(rawID, userHandle []byte) (webauthn.User, error) {
-			u, err := s.db.UserByID(r.Context(), parseInt64(string(userHandle)))
-			if err != nil {
-				return nil, err
-			}
-			if u.Suspended {
-				return nil, errors.New("account suspended")
-			}
-			keys, err := s.db.PasskeysFor(r.Context(), u.ID)
-			if err != nil {
-				return nil, err
-			}
-			account = u
-			return &passkey.User{Account: u, Credentials: keys}, nil
-		}, *session.Data, parsed)
-	if err != nil || account == nil {
-		s.audit(r, "auth.login", "", false, "passkey rejected")
-		// One message for every failure: which passkey was offered, and
-		// whether the account exists, are both things an attacker would like
-		// to learn from the difference.
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "that passkey was not accepted")
-		return
-	}
-
-	id := base64.RawURLEncoding.EncodeToString(cred.ID)
-	// A counter that goes backwards is the one sign this protocol gives that
-	// an authenticator has been cloned. Refusing is the whole value of it.
-	if cred.Authenticator.CloneWarning {
-		s.audit(r, "auth.login", account.Username, false, "passkey clone warning")
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "that passkey was not accepted")
-		return
-	}
-	_ = s.db.TouchPasskey(r.Context(), id, cred.Authenticator.SignCount)
-
-	sess, cookie, err := s.auth.StartSession(r.Context(), account, ip, r.UserAgent())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
-	s.loginLimiter.Reset(ip)
-	s.audit(r, "auth.login", account.Username, true, "passkey")
-	s.setSessionCookie(w, cookie, sess.ExpiresAt)
-	writeJSON(w, http.StatusOK, loginResponse{User: viewUser(account), ExpiresAt: sess.ExpiresAt})
-}
-
 // --- plumbing -------------------------------------------------------------
 
 // storedSession is a challenge with its decoded payload.
@@ -418,14 +314,7 @@ func parseInt64(s string) int64 {
 	return n
 }
 
-// handlePasskeyAvailable tells the login page whether to offer the button.
-//
-// Unauthenticated, and deliberately says nothing else: whether a server
-// offers passkeys is visible to anyone who can see the login page anyway,
-// but the blockers behind it are not.
-func (s *Server) handlePasskeyAvailable(w http.ResponseWriter, r *http.Request) {
-	state := s.passkeyReadiness(r.Context())
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"available": state.Ready && state.Enabled,
-	})
+// credentialID is the stored form of a credential's id.
+func credentialID(c *webauthn.Credential) string {
+	return base64.RawURLEncoding.EncodeToString(c.ID)
 }

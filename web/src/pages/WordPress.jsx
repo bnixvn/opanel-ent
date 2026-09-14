@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Card, Empty, Message, Search, Tag, matches, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
+import WordPressInstall, { useWordPressInstall } from '../WordPressInstall.jsx';
 
 export default function WordPress({ me }) {
   const [sites, setSites] = useState([]);
   const [open, setOpen] = useState(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  // Websites with no WordPress yet, so one can be installed from here rather
+  // than from the websites page.
+  const [candidates, setCandidates] = useState([]);
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState(null);
   const msg = useMessage();
 
   const staff = me.role === 'admin' || me.role === 'reseller';
@@ -15,6 +21,22 @@ export default function WordPress({ me }) {
     try {
       const res = await api.get('/wordpress');
       setSites(res.sites || []);
+
+      // Which websites could take one. A site is a candidate when it runs
+      // PHP and has nothing in its document root yet; the panel asks the
+      // disk rather than trusting the sites table, because a customer can
+      // put files there over SFTP without telling it.
+      const all = (await api.get('/sites')).sites || [];
+      const withWP = new Set((res.sites || []).map((x) => x.site_id));
+      const open = [];
+      for (const site of all) {
+        if (withWP.has(site.id) || site.app_type === 'static' || site.suspended) continue;
+        try {
+          const st = await api.get(`/sites/${site.id}/wordpress`);
+          if (st.wordpress && st.wordpress.empty && st.wordpress.cli_ready) open.push(site);
+        } catch { /* a site the caller cannot reach is not a candidate */ }
+      }
+      setCandidates(open);
     } catch (err) {
       msg.fail(err);
     }
@@ -29,9 +51,48 @@ export default function WordPress({ me }) {
     <>
       <Message value={msg.message} onClear={msg.clear} />
 
+      {installed && (
+        <Card title="WordPress is installed">
+          <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+            The administrator password is shown once. The panel keeps no copy
+            it can read back.
+          </p>
+          <dl className="kv">
+            <dt>Site</dt>
+            <dd><a href={installed.site_url} target="_blank" rel="noreferrer">{installed.site_url}</a></dd>
+            <dt>Dashboard</dt>
+            <dd><a href={installed.admin_url} target="_blank" rel="noreferrer">{installed.admin_url}</a></dd>
+            <dt>Database</dt><dd><code>{installed.database}</code></dd>
+          </dl>
+          <Secret label="Administrator" value={installed.admin_user} />
+          <Secret label="Password" value={installed.admin_password} />
+          <button type="button" onClick={() => setInstalled(null)}>Close</button>
+        </Card>
+      )}
+
+      {installing && (
+        <InstallHere
+          candidates={candidates}
+          onCancel={() => setInstalling(false)}
+          onDone={(wordpress) => { setInstalling(false); setInstalled(wordpress); load(); }}
+          onFailed={(err) => msg.fail(err)}
+        />
+      )}
+
       <Card
         title="WordPress websites"
-        actions={<Search value={query} onChange={setQuery} placeholder="Search domains…" />}
+        actions={(
+          <>
+            {candidates.length > 0 && !installing && (
+              <>
+                <button type="button" className="primary" onClick={() => setInstalling(true)}>
+                  Install WordPress
+                </button>{' '}
+              </>
+            )}
+            <Search value={query} onChange={setQuery} placeholder="Search domains…" />
+          </>
+        )}
       >
         {loading ? <p className="muted">Looking at every website…</p> : shown.length === 0 ? (
           <Empty>
@@ -307,5 +368,74 @@ function Components({ kind, title, rows, updates, busy, onRun }) {
         </table>
       </div>
     </>
+  );
+}
+
+
+// InstallHere installs WordPress onto a website that has none.
+//
+// Here rather than only on the websites page, because this is where somebody
+// managing WordPress is already looking. The list is websites that can take
+// one: running PHP, not suspended, and with an empty document root.
+function InstallHere({ candidates, onDone, onCancel, onFailed }) {
+  const [siteID, setSiteID] = useState(String(candidates[0] ? candidates[0].id : ''));
+  const [busy, setBusy] = useState(false);
+  const wp = useWordPressInstall();
+
+  const site = candidates.find((c) => String(c.id) === String(siteID)) || {};
+
+  return (
+    <Card
+      title="Install WordPress"
+      actions={<button type="button" onClick={onCancel} disabled={busy}>Cancel</button>}
+    >
+      <div className="row">
+        <div className="field">
+          <label htmlFor="wpSite">Website</label>
+          <select id="wpSite" value={siteID} onChange={(e) => setSiteID(e.target.value)}>
+            {candidates.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.domain}{c.ssl_enabled ? '' : '  (no certificate yet)'}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {site.id && !site.ssl_enabled && (
+        <p className="msg warn">
+          {site.domain} has no certificate, so WordPress will be set up on
+          http://{site.domain}. Getting the certificate first is easier than
+          changing the address inside WordPress afterwards.
+        </p>
+      )}
+
+      <WordPressInstall
+        domain={site.domain}
+        owner={site.owner}
+        value={wp.value}
+        onChange={wp.setValue}
+      />
+
+      <p style={{ marginBottom: 0, marginTop: '.7rem' }}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || !siteID}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const res = await api.post(`/sites/${siteID}/wordpress`, wp.body());
+              onDone(res.wordpress);
+            } catch (err) {
+              onFailed(err);
+            }
+            setBusy(false);
+          }}
+        >
+          {busy ? 'Installing — leave the page open…' : 'Install WordPress'}
+        </button>
+      </p>
+    </Card>
   );
 }

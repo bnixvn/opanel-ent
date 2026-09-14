@@ -13,6 +13,9 @@ export default function Waf() {
   const [events, setEvents] = useState([]);
   const [mode, setMode] = useState('detect');
   const [excluded, setExcluded] = useState('');
+  // The rule set as categories, and which ones are switched off.
+  const [rules, setRules] = useState([]);
+  const [disabled, setDisabled] = useState([]);
   const [busy, setBusy] = useState(false);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
@@ -26,6 +29,11 @@ export default function Waf() {
     try {
       setEvents((await api.get('/waf/events')).events || []);
     } catch { /* no audit log yet is normal */ }
+    try {
+      const res = await api.get('/waf/rules');
+      setRules(res.rules || []);
+      setDisabled((res.rules || []).filter((x) => !x.enabled).map((x) => x.file));
+    } catch { /* the rule set may not be installed */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
@@ -99,7 +107,7 @@ export default function Waf() {
               e.preventDefault();
               const ids = excluded.split(/[\s,]+/).filter(Boolean);
               run(
-                () => api.put('/waf', { mode, excluded_rules: ids }),
+                () => api.put('/waf', { mode, excluded_rules: ids, disabled_files: disabled }),
                 `WAF set to ${MODES.find((m) => m.id === mode).label.toLowerCase()}`,
               );
             }}
@@ -131,7 +139,63 @@ export default function Waf() {
         </Card>
       )}
 
-      <Card title="Protected websites">
+      {waf.rules_installed && rules.length > 0 && (
+        <Card title="Rule set">
+          <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+            The OWASP Core Rule Set, by category. Switching one off applies to
+            every website — it is the thing to reach for when a category fires
+            on ordinary traffic and a single rule id is not enough. Saving the
+            mode above applies these too.
+          </p>
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr><th style={{ width: '1.6rem' }} /><th>Protects against</th><th>Rules</th><th>When</th></tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.file} className={disabled.includes(r.file) ? undefined : 'selected'}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={r.title}
+                        disabled={r.required}
+                        checked={r.required || !disabled.includes(r.file)}
+                        onChange={() => setDisabled(
+                          disabled.includes(r.file)
+                            ? disabled.filter((f) => f !== r.file)
+                            : [...disabled, r.file],
+                        )}
+                      />
+                    </td>
+                    <td>
+                      {r.title}
+                      {r.required && <> <Tag kind="mute">needed</Tag></>}
+                      {r.help && (
+                        <div className="muted" style={{ fontSize: '.78rem' }}>{r.help}</div>
+                      )}
+                      <div className="muted" style={{ fontSize: '.72rem' }}><code>{r.file}</code></div>
+                    </td>
+                    <td className="muted nowrap">{r.rules || '—'}</td>
+                    <td className="muted nowrap">{r.phase}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted" style={{ fontSize: '.82rem', marginBottom: 0 }}>
+            The categories marked &ldquo;needed&rdquo; are initialisation and
+            scoring. Switching one of those off does not relax the rules, it
+            stops them working, so they are not offered as a choice.
+          </p>
+        </Card>
+      )}
+
+      <Card title="Websites">
+        <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+          Each website decides for itself whether the engine runs at all. The
+          rule set and the mode above are shared; this is the switch.
+        </p>
         {data.sites.length === 0 ? <Empty>No websites yet.</Empty> : (
           <div className="scroll">
             <table>

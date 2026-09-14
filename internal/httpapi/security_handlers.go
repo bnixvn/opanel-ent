@@ -241,12 +241,18 @@ func (s *Server) handleWAFConfigure(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Mode          string   `json:"mode"`
 		ExcludedRules []string `json:"excluded_rules"`
+		// The complete set of categories to leave out, every time: one left
+		// out of this list is switched back on.
+		DisabledFiles []string `json:"disabled_files"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	st, err := agentclient.Call[actions.WAFStatus](r.Context(), s.agent, "waf.configure", 1,
-		actions.WAFConfigureRequest{Mode: req.Mode, ExcludedRules: req.ExcludedRules})
+		actions.WAFConfigureRequest{
+			Mode: req.Mode, ExcludedRules: req.ExcludedRules,
+			DisabledFiles: req.DisabledFiles,
+		})
 	if err != nil {
 		s.audit(r, "waf.configure", req.Mode, false, err.Error())
 		writeError(w, http.StatusBadRequest, "bad_request", trimAgent(err.Error()))
@@ -295,4 +301,19 @@ func (s *Server) handleSiteWAF(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "waf.site", site.Domain, true, strconv.FormatBool(req.Enabled))
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": req.Enabled})
+}
+
+// handleWAFRules lists the rule set as categories somebody can switch off.
+//
+// Whole files rather than individual rule ids: the rules inside one are one
+// kind of attack and are written to work together, and "turn off the SQL
+// injection checks because this CMS stores SQL in a form field" is the
+// decision an operator actually has to make after a false positive.
+func (s *Server) handleWAFRules(w http.ResponseWriter, r *http.Request) {
+	res, err := agentclient.Call[actions.WAFRulesResult](r.Context(), s.agent, "waf.rules", 1, struct{}{})
+	if err != nil {
+		s.agentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

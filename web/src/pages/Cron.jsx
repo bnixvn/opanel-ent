@@ -218,9 +218,6 @@ function JobForm({ job, presets, busy, onSubmit, onCancel }) {
             onChange={(e) => setSchedule(e.target.value)}
             style={{ fontFamily: 'ui-monospace, monospace' }}
           />
-          <div className="muted" style={{ fontSize: '.75rem' }}>
-            minute hour day month weekday
-          </div>
         </div>
         <div className="field">
           <label htmlFor="cronNote">Note</label>

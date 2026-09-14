@@ -345,10 +345,10 @@ function Passkeys({ msg }) {
   return (
     <Card title="Passkeys">
       <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-        Sign in with your phone, laptop or a security key instead of a
-        password. The key never leaves the device, and it only works at{' '}
-        <code>{state.origin}</code> — so a copy of this login page on another
-        address cannot use it.
+        Used as your second step after the password, in place of a
+        two-factor code. The key never leaves your phone, laptop or security
+        key, and it only works at <code>{state.origin}</code> — so a copy of
+        this login page on another address cannot ask for it.
       </p>
 
       {keys.length === 0 ? (

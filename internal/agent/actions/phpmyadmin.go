@@ -19,10 +19,14 @@ import (
 // Where phpMyAdmin lives. Outside any customer's home, served by its own
 // vhost, so one customer's PHP cannot read another's session files.
 const (
-	pmaRoot    = "/usr/share/phpmyadmin"
-	pmaConfig  = pmaRoot + "/config.inc.php"
-	pmaSignon  = pmaRoot + "/opanel-sso.php"
-	pmaTmpDir  = "/var/lib/opanel/phpmyadmin-tmp"
+	pmaRoot   = "/usr/share/phpmyadmin"
+	pmaConfig = pmaRoot + "/config.inc.php"
+	pmaSignon = pmaRoot + "/opanel-sso.php"
+	// Not under /var/lib/opanel: that directory is 0750 and owned by the
+	// panel, so the webserver account cannot traverse into it, and
+	// phpMyAdmin then reports an unusable temp directory on every page it
+	// draws. /var/cache is world-traversable, which is what this needs.
+	pmaTmpDir  = "/var/cache/opanel-phpmyadmin"
 	pmaVersion = "5.2.2"
 	pmaURL     = "https://files.phpmyadmin.net/phpMyAdmin/" + pmaVersion +
 		"/phpMyAdmin-" + pmaVersion + "-all-languages.tar.gz"
@@ -189,6 +193,11 @@ func installPMA(ctx context.Context) error {
 	if err := chownToWebserver(pmaTmpDir); err != nil {
 		return err
 	}
+	// Proved rather than assumed: every symptom of an unreachable temp
+	// directory appears inside phpMyAdmin, where the cause is invisible.
+	if err := checkWebserverCanWrite(pmaTmpDir); err != nil {
+		return err
+	}
 
 	secret, err := randomSecret(32)
 	if err != nil {
@@ -273,12 +282,16 @@ func quoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// webserverUser is the account OpenLiteSpeed runs as, and therefore the one
+// that has to be able to read phpMyAdmin's configuration and write its cache.
+const webserverUser = "nobody"
+
 // chownToWebserver hands a path to the account OpenLiteSpeed runs as.
 func chownToWebserver(p string) error {
 	// The webserver user is what serves phpMyAdmin, and it is the only
 	// account that should be able to read the configuration holding the
 	// signon secret.
-	res, err := run.Cmd(context.Background(), []string{"id", "-u", "nobody"})
+	res, err := run.Cmd(context.Background(), []string{"id", "-u", webserverUser})
 	if err != nil {
 		return err
 	}
@@ -298,3 +311,21 @@ const PMAPort = 8081
 // own software, and it should not stop working because a customer moved
 // their site to an older PHP.
 const PMAPHPVersion = "8.4"
+
+// checkWebserverCanWrite proves the webserver account can actually use a
+// directory, by being that account for one write.
+//
+// Ownership is not enough: a directory owned by the right account inside one
+// the account cannot traverse is unreachable, and every symptom of that
+// appears inside phpMyAdmin rather than here.
+func checkWebserverCanWrite(dir string) error {
+	probe := filepath.Join(dir, ".opanel-write-test")
+	if _, err := run.Cmd(context.Background(), []string{
+		"runuser", "-u", webserverUser, "--", "touch", probe,
+	}, run.Timeout(30*time.Second)); err != nil {
+		return fmt.Errorf("%s is not usable by the webserver account %q; "+
+			"phpMyAdmin needs a temp directory it can write to", dir, webserverUser)
+	}
+	_ = os.Remove(probe)
+	return nil
+}

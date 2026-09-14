@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtDate } from '../api.js';
 import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
+import WordPressInstall, { useWordPressInstall } from '../WordPressInstall.jsx';
 
 export default function Sites({ me }) {
   const [sites, setSites] = useState([]);
@@ -9,6 +10,9 @@ export default function Sites({ me }) {
   const [wp, setWp] = useState({});
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
+  // The website waiting for its WordPress details, when the install button
+  // on a row was pressed.
+  const [wpFor, setWpFor] = useState(null);
   const [installed, setInstalled] = useState(null);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
@@ -52,7 +56,7 @@ export default function Sites({ me }) {
   // before: a website whose certificate could not be issued because DNS has
   // not propagated is still a website, and the SSL page can finish the job in
   // a minute.
-  async function createSite({ domain, ownerID, version, wordpress, ssl }) {
+  async function createSite({ domain, ownerID, version, wordpress, ssl, wpDetails }) {
     msg.clear();
     setBusy('new');
     let site;
@@ -86,7 +90,7 @@ export default function Sites({ me }) {
     if (wordpress) {
       msg.ok(`${notes.join(', ')}. Installing WordPress — leave the page open.`);
       try {
-        const res = await api.post(`/sites/${site.id}/wordpress`, {});
+        const res = await api.post(`/sites/${site.id}/wordpress`, wpDetails || {});
         setInstalled(res.wordpress);
         notes.push('WordPress installed');
       } catch (err) {
@@ -134,6 +138,28 @@ export default function Sites({ me }) {
         me={me}
         onCreate={createSite}
       />
+
+      {wpFor && (
+        <InstallWordPressCard
+          site={wpFor}
+          onCancel={() => setWpFor(null)}
+          onDone={async (fn) => {
+            setBusy(wpFor.id);
+            msg.ok(`Installing WordPress on ${wpFor.domain}. Leave the page open.`);
+            try {
+              const res = await fn();
+              setInstalled(res.wordpress);
+              setWpFor(null);
+              msg.clear();
+            } catch (err) {
+              msg.fail(err);
+            }
+            setBusy(null);
+            const rows = await load();
+            loadWordPress(rows);
+          }}
+        />
+      )}
 
       {installed && (
         <Card title="WordPress is installed">
@@ -278,34 +304,7 @@ export default function Sites({ me }) {
                         site={s}
                         status={wp[s.id]}
                         busy={busy === s.id}
-                        onInstall={async () => {
-                          const ok = await ask({
-                            title: `Install WordPress on ${s.domain}?`,
-                            body:
-                              'This creates a database and a database account, downloads '
-                              + 'WordPress and runs the installer. It takes a minute or two.\n\n'
-                              + (s.ssl_enabled
-                                ? `The site will be set up on https://${s.domain}.`
-                                : `This site has no certificate yet, so WordPress will be set up on `
-                                  + `http://${s.domain}. Turning SSL on afterwards means changing the `
-                                  + `address inside WordPress as well — it is easier to get the `
-                                  + `certificate first.`),
-                            confirmLabel: 'Install',
-                          });
-                          if (!ok) return;
-                          setBusy(s.id);
-                          msg.ok(`Installing WordPress on ${s.domain}. Leave the page open.`);
-                          try {
-                            const res = await api.post(`/sites/${s.id}/wordpress`, {});
-                            setInstalled(res.wordpress);
-                            msg.clear();
-                          } catch (err) {
-                            msg.fail(err);
-                          }
-                          setBusy(null);
-                          const rows = await load();
-                          loadWordPress(rows);
-                        }}
+                        onInstall={() => setWpFor(s)}
                       />
                     </td>
                     <td>
@@ -431,6 +430,7 @@ function WordPressCell({ site, status, busy, onInstall }) {
 }
 
 function NewSite({ php, owners, staff, me, onCreate }) {
+  const wp = useWordPressInstall();
   const [domain, setDomain] = useState('');
   const [version, setVersion] = useState('');
   const [owner, setOwner] = useState('');
@@ -468,9 +468,10 @@ function NewSite({ php, owners, staff, me, onCreate }) {
             version,
             wordpress,
             ssl,
+            wpDetails: wordpress ? wp.body() : null,
           });
           setBusy(false);
-          if (created) setDomain('');
+          if (created) { setDomain(''); wp.reset(); }
         }}
       >
         <div className="field">
@@ -530,6 +531,17 @@ function NewSite({ php, owners, staff, me, onCreate }) {
             Install WordPress
           </label>
         </div>
+        {wordpress && (
+          <div style={{ flexBasis: '100%' }}>
+            <WordPressInstall
+              embedded
+              domain={domain.trim()}
+              owner={ownerName}
+              value={wp.value}
+              onChange={wp.setValue}
+            />
+          </div>
+        )}
         <p className="muted" style={{ fontSize: '.83rem', flexBasis: '100%', margin: '.4rem 0 0' }}>
           {staff && eligible.length === 0 ? (
             <>Create a hosting account under Users first — a website&apos;s files
@@ -544,6 +556,56 @@ function NewSite({ php, owners, staff, me, onCreate }) {
           )}
         </p>
       </form>
+    </Card>
+  );
+}
+
+
+// InstallWordPressCard asks for the details before it installs.
+//
+// A dialog rather than a confirmation, because everything here ends up baked
+// into the site's database: changing the administrator's name afterwards
+// means editing WordPress, and changing the address means editing it in two
+// places.
+function InstallWordPressCard({ site, onDone, onCancel }) {
+  const wp = useWordPressInstall();
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Card
+      title={<>Install WordPress on <code>{site.domain}</code></>}
+      actions={<button type="button" onClick={onCancel} disabled={busy}>Cancel</button>}
+    >
+      <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+        This creates a database and a database account, downloads WordPress
+        and runs the installer. It takes a minute or two.
+        {!site.ssl_enabled && (
+          <> This website has no certificate yet, so WordPress will be set up
+            on <code>http://{site.domain}</code>. Getting the certificate first
+            is easier than changing the address inside WordPress afterwards.</>
+        )}
+      </p>
+
+      <WordPressInstall
+        domain={site.domain}
+        owner={site.owner}
+        value={wp.value}
+        onChange={wp.setValue}
+      />
+
+      <p style={{ marginBottom: 0, marginTop: '.7rem' }}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            onDone(() => api.post(`/sites/${site.id}/wordpress`, wp.body()));
+          }}
+        >
+          {busy ? 'Installing…' : 'Install WordPress'}
+        </button>
+      </p>
     </Card>
   );
 }

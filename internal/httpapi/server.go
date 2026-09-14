@@ -88,12 +88,6 @@ func (s *Server) routes() http.Handler {
 		// Unauthenticated.
 		api.Get("/health", s.handleHealth)
 		api.Post("/auth/login", s.handleLogin)
-		// Passkey sign-in. Unauthenticated by necessity -- the assertion is
-		// the credential -- and rate limited like the password form.
-		api.Post("/auth/passkey/login/start", s.handlePasskeyLoginStart)
-		api.Post("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
-		// The login page needs to know whether to offer the button at all.
-		api.Get("/auth/passkey/available", s.handlePasskeyAvailable)
 		// The login page needs the brand before anyone has signed in.
 		api.Get("/branding", s.handleBranding)
 		// Called by the phpMyAdmin shim over the loopback address, which
@@ -284,6 +278,7 @@ func (s *Server) routes() http.Handler {
 				ar.Get("/waf", s.handleWAFStatus)
 				ar.Post("/waf/install", s.handleWAFInstall)
 				ar.Put("/waf", s.handleWAFConfigure)
+				ar.Get("/waf/rules", s.handleWAFRules)
 				ar.Get("/waf/events", s.handleWAFEvents)
 				ar.Post("/sites/{id}/waf", s.handleSiteWAF)
 

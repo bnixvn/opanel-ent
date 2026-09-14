@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { api } from './api.js';
 import { Message, useMessage } from './components.jsx';
 import * as passkeys from './passkey.js';
@@ -9,32 +9,13 @@ export default function Login({ brand, onSignedIn }) {
   const [code, setCode] = useState('');
   const [needsCode, setNeedsCode] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [passkeyOffered, setPasskeyOffered] = useState(false);
   const msg = useMessage();
 
-  // Both halves have to be true before the button is worth showing: the
-  // server has to have passkeys switched on, and the browser has to be able
-  // to use them here, which it will not be over plain HTTP.
-  useEffect(() => {
-    if (!passkeys.supported()) return;
-    api.get('/auth/passkey/available')
-      .then((r) => setPasskeyOffered(!!r.available))
-      .catch(() => {});
-  }, []);
-
-  async function signInWithPasskey() {
-    setBusy(true);
-    msg.clear();
-    try {
-      const res = await passkeys.signIn();
-      onSignedIn(res.user || res);
-    } catch (err) {
-      // Cancelling the browser's prompt is not an error to report back.
-      if (err && err.name === 'NotAllowedError') msg.clear();
-      else msg.fail(err);
-    } finally {
-      setBusy(false);
-    }
+  // Sends the password, and whatever second step the server asked for.
+  async function attempt(extra) {
+    const body = { username, password };
+    if (needsCode && code) body.code = code;
+    return api.post('/auth/login', { ...body, ...extra });
   }
 
   async function submit(e) {
@@ -42,22 +23,54 @@ export default function Login({ brand, onSignedIn }) {
     setBusy(true);
     msg.clear();
     try {
-      const body = { username, password };
-      if (needsCode && code) body.code = code;
-      const res = await api.post('/auth/login', body);
+      const res = await attempt({});
       onSignedIn(res.user || res);
     } catch (err) {
-      // The server asks for a second factor with its own code, so the form
-      // knows to show the field without guessing from the message text.
-      if (err.code === 'totp_required' || err.code === 'two_factor_required') {
-        setNeedsCode(true);
-        msg.warn('Enter the code from your authenticator app.');
-      } else {
-        msg.fail(err);
-      }
+      await handleSecondStep(err);
     } finally {
       setBusy(false);
     }
+  }
+
+  // The server replies with a distinct code rather than a message the form
+  // has to read, so what is asked for next is the server's decision.
+  async function handleSecondStep(err) {
+    if (err.code === 'passkey_required') {
+      if (!passkeys.supported()) {
+        msg.fail(new Error(
+          'This account uses a passkey, which this browser cannot offer here. '
+          + 'Open the panel over HTTPS with a certificate the browser trusts.',
+        ));
+        return;
+      }
+      msg.warn('Confirm with your passkey.');
+      try {
+        const assertion = await passkeys.assertFrom(err.details);
+        const res = await attempt({
+          passkey_challenge_id: err.details.challenge_id,
+          passkey_credential: assertion,
+        });
+        onSignedIn(res.user || res);
+        return;
+      } catch (inner) {
+        // Cancelling the browser's prompt is not a failure to shout about.
+        if (inner && inner.name === 'NotAllowedError') {
+          msg.warn(err.details && err.details.totp_available
+            ? 'Passkey cancelled. Enter your two-factor code instead.'
+            : 'Passkey cancelled.');
+          if (err.details && err.details.totp_available) setNeedsCode(true);
+          return;
+        }
+        msg.fail(inner);
+        return;
+      }
+    }
+    if (err.code === 'totp_required' || err.code === 'two_factor_required') {
+      setNeedsCode(true);
+      msg.warn('Enter the code from your authenticator app.');
+      return;
+    }
+    msg.fail(err);
   }
 
   return (
@@ -103,28 +116,11 @@ export default function Login({ brand, onSignedIn }) {
             />
           </p>
         )}
-        <p>
+        <p style={{ marginBottom: 0 }}>
           <button type="submit" className="primary" style={{ width: '100%' }} disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </p>
-        {passkeyOffered && (
-          <>
-            <p className="muted" style={{ textAlign: 'center', margin: '.2rem 0', fontSize: '.8rem' }}>
-              or
-            </p>
-            <p style={{ marginBottom: 0 }}>
-              <button
-                type="button"
-                style={{ width: '100%' }}
-                disabled={busy}
-                onClick={signInWithPasskey}
-              >
-                Sign in with a passkey
-              </button>
-            </p>
-          </>
-        )}
       </form>
     </div>
   );

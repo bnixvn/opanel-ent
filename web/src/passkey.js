@@ -61,13 +61,13 @@ export async function register(label) {
   });
 }
 
-// signIn asks the browser for whichever passkey matches this site.
+// assertFrom answers a passkey challenge the login response carried.
 //
-// No username is sent: the account comes back with the assertion. Asking for
-// one first would tell anybody who asked which usernames exist.
-export async function signIn() {
-  const start = await api.post('/auth/passkey/login/start', {});
-  const opts = start.options.publicKey;
+// The options come with the "confirm with your passkey" reply rather than
+// from a second request: the server has already checked the password and
+// knows which account, so there is nothing left to ask it.
+export async function assertFrom(details) {
+  const opts = details.options.publicKey;
 
   const assertion = await navigator.credentials.get({
     publicKey: {
@@ -80,20 +80,17 @@ export async function signIn() {
   });
   if (!assertion) throw new Error('No passkey was offered.');
 
-  return api.post('/auth/passkey/login/finish', {
-    challenge_id: start.challenge_id,
-    credential: {
-      id: assertion.id,
-      rawId: toBase64Url(assertion.rawId),
-      type: assertion.type,
-      clientExtensionResults: assertion.getClientExtensionResults(),
-      response: {
-        clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
-        authenticatorData: toBase64Url(assertion.response.authenticatorData),
-        signature: toBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle
-          ? toBase64Url(assertion.response.userHandle) : '',
-      },
+  return {
+    id: assertion.id,
+    rawId: toBase64Url(assertion.rawId),
+    type: assertion.type,
+    clientExtensionResults: assertion.getClientExtensionResults(),
+    response: {
+      clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
+      authenticatorData: toBase64Url(assertion.response.authenticatorData),
+      signature: toBase64Url(assertion.response.signature),
+      userHandle: assertion.response.userHandle
+        ? toBase64Url(assertion.response.userHandle) : '',
     },
-  });
+  };
 }

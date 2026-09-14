@@ -23,26 +23,29 @@ import Settings from './pages/Settings.jsx';
 
 // The menu. `roles` lists who sees an entry; the API enforces the same rule,
 // so hiding one is a convenience and never the protection.
+//
+// Three groups rather than four, and the two that grew longest are cut down:
+// a sidebar somebody has to read is one they stop reading. What a customer
+// touches daily is at the top with no heading; what an operator touches
+// occasionally is below one.
 const MENU = [
   { group: '', items: [
     { to: '/', label: 'Websites', end: true },
-    { to: '/databases', label: 'Databases' },
     { to: '/wordpress', label: 'WordPress' },
-    { to: '/files', label: 'File manager' },
+    { to: '/databases', label: 'Databases' },
+    { to: '/files', label: 'Files' },
     { to: '/backups', label: 'Backups' },
     { to: '/ssl', label: 'SSL' },
+    { to: '/security/malware', label: 'Malware' },
     { to: '/cron', label: 'Cron' },
     { to: '/logs', label: 'Logs' },
-  ] },
-  { group: 'Security', items: [
-    { to: '/security/malware', label: 'Malware' },
-    { to: '/security/firewall', label: 'Firewall', roles: ['admin'] },
-    { to: '/security/waf', label: 'WAF', roles: ['admin'] },
   ] },
   { group: 'Server', roles: ['admin', 'reseller'], items: [
     { to: '/users', label: 'Users', roles: ['admin', 'reseller'] },
     { to: '/packages', label: 'Packages', roles: ['admin', 'reseller'] },
     { to: '/import', label: 'Import', roles: ['admin', 'reseller'] },
+    { to: '/security/firewall', label: 'Firewall', roles: ['admin'] },
+    { to: '/security/waf', label: 'WAF', roles: ['admin'] },
     { to: '/php', label: 'PHP', roles: ['admin'] },
     { to: '/system', label: 'System', roles: ['admin'] },
     { to: '/settings', label: 'Settings', roles: ['admin'] },

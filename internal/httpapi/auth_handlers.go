@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,6 +15,11 @@ type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Code     string `json:"code,omitempty"` // TOTP or recovery code
+	// The passkey second step. The password is sent again with it, the same
+	// way it is with a two-factor code: the server keeps no half-signed-in
+	// state between the two requests.
+	PasskeyChallengeID string          `json:"passkey_challenge_id,omitempty"`
+	PasskeyCredential  json.RawMessage `json:"passkey_credential,omitempty"`
 }
 
 type userView struct {
@@ -50,27 +56,36 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.auth.Login(r.Context(), req.Username, req.Password, req.Code, ip, r.UserAgent())
+	// The password first, always. A passkey here is a second factor and not
+	// a way in: the account is named and proven before any authenticator is
+	// asked for anything.
+	user, err := s.auth.VerifyCredentials(r.Context(), req.Username, req.Password)
 	if err != nil {
 		s.audit(r, "auth.login", req.Username, false, err.Error())
 		switch {
-		case errors.Is(err, auth.ErrTOTPRequired):
-			// Not a failure: the password was right and a second factor is
-			// now expected. A distinct code lets the UI show the 2FA field.
-			writeError(w, http.StatusUnauthorized, "totp_required", "two-factor code required")
-		case errors.Is(err, auth.ErrTOTPInvalid):
-			writeError(w, http.StatusUnauthorized, "totp_invalid", "invalid two-factor code")
 		case errors.Is(err, auth.ErrSuspended):
 			writeError(w, http.StatusForbidden, "suspended", "account is suspended")
 		case errors.Is(err, auth.ErrInvalidCredentials):
-			// Same response whether the username exists or not.
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
+			// The same response whether the username exists or not.
+			writeError(w, http.StatusUnauthorized, "invalid_credentials",
+				"invalid username or password")
 		default:
 			s.log.Error("httpapi: login", "err", err)
 			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		}
 		return
 	}
+
+	if done := s.secondFactor(w, r, user, req); !done {
+		return
+	}
+
+	sess, cookie, err := s.auth.StartSession(r.Context(), user, ip, r.UserAgent())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	res := &auth.LoginResult{User: user, Session: sess, Cookie: cookie}
 
 	s.loginLimiter.Reset(ip)
 	s.setSessionCookie(w, res.Cookie, res.Session.ExpiresAt)

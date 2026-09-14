@@ -85,26 +85,9 @@ type LoginResult struct {
 // is still needed. Disclosing that is safe: the caller has already proven the
 // password.
 func (s *Service) Login(ctx context.Context, username, password, code, ip, userAgent string) (*LoginResult, error) {
-	u, err := s.store.UserByUsername(ctx, strings.TrimSpace(username))
-	if errors.Is(err, db.ErrNotFound) {
-		_ = VerifyPassword(dummyHash, password)
-		return nil, ErrInvalidCredentials
-	}
+	u, err := s.VerifyCredentials(ctx, username, password)
 	if err != nil {
 		return nil, err
-	}
-
-	if err := VerifyPassword(u.PasswordHash, password); err != nil {
-		if errors.Is(err, ErrMismatch) || errors.Is(err, ErrBadHash) {
-			return nil, ErrInvalidCredentials
-		}
-		return nil, err
-	}
-
-	// Checked after the password so a suspended account is not disclosed to
-	// someone who does not already know the password.
-	if u.Suspended {
-		return nil, ErrSuspended
 	}
 
 	if u.TOTPEnabled {
@@ -116,18 +99,56 @@ func (s *Service) Login(ctx context.Context, username, password, code, ip, userA
 		}
 	}
 
+	sess, cookie, err := s.newSession(ctx, u.ID, ip, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{User: u, Session: sess, Cookie: cookie}, nil
+}
+
+// VerifyCredentials checks a username and password and returns the account,
+// without creating a session.
+//
+// Separate from Login because a second factor is no longer only a TOTP code:
+// an account with a passkey registered is asked for the passkey instead, and
+// the caller has to know the password was right before it can decide which to
+// ask for.
+func (s *Service) VerifyCredentials(ctx context.Context, username, password string) (*db.User, error) {
+	u, err := s.store.UserByUsername(ctx, strings.TrimSpace(username))
+	if errors.Is(err, db.ErrNotFound) {
+		// The same work as a real verification, so a login attempt for an
+		// unknown username costs the same wall-clock time as one for a
+		// known one.
+		_ = VerifyPassword(dummyHash, password)
+		return nil, ErrInvalidCredentials
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := VerifyPassword(u.PasswordHash, password); err != nil {
+		if errors.Is(err, ErrMismatch) || errors.Is(err, ErrBadHash) {
+			return nil, ErrInvalidCredentials
+		}
+		return nil, err
+	}
+	// Checked after the password so a suspended account is not disclosed to
+	// somebody who does not already know the password.
+	if u.Suspended {
+		return nil, ErrSuspended
+	}
 	// Opportunistically upgrade hashes made with weaker parameters.
 	if NeedsRehash(u.PasswordHash) {
 		if nh, herr := HashPassword(password); herr == nil {
 			_ = s.store.SetPasswordHash(ctx, u.ID, nh)
 		}
 	}
+	return u, nil
+}
 
-	sess, cookie, err := s.newSession(ctx, u.ID, ip, userAgent)
-	if err != nil {
-		return nil, err
-	}
-	return &LoginResult{User: u, Session: sess, Cookie: cookie}, nil
+// CheckSecondFactor verifies a TOTP or recovery code for an account whose
+// password has already been checked.
+func (s *Service) CheckSecondFactor(ctx context.Context, u *db.User, code string) error {
+	return s.checkSecondFactor(ctx, u, code)
 }
 
 func (s *Service) checkSecondFactor(ctx context.Context, u *db.User, code string) error {
