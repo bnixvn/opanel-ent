@@ -60,11 +60,84 @@ func allSteps() []Step {
 		{Name: "Create directories", Apply: stepDirectories},
 		{Name: "Install binaries", Apply: stepBinaries},
 		{Name: "Install systemd units", Apply: stepUnits},
+		{Name: "Install WP-CLI", Check: checkWPCLI, Apply: stepWPCLI},
 		{Name: "Configure SFTP", Check: checkSFTP, Apply: stepSFTP},
 		{Name: "Configure firewall", Check: checkFirewall, Apply: stepFirewall},
 		{Name: "Enable valkey", Apply: stepValkey},
 		{Name: "Start agent and API", Apply: stepStartServices},
 	}
+}
+
+// wpCLIURL and wpCLISumURL are the upstream release and its published
+// checksum. Both come from the same origin, so this is not a defence against
+// a compromised wp-cli.org -- it is a defence against a truncated download
+// and a corrupted mirror, which are the failures that actually happen.
+const (
+	wpCLIURL    = "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
+	wpCLISumURL = wpCLIURL + ".sha512"
+)
+
+func checkWPCLI(_ context.Context, _ *Options) (bool, error) {
+	_, err := os.Stat(actions.WPCLIPath)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}
+
+// stepWPCLI fetches WP-CLI, which is what makes the one-click WordPress
+// install possible. It is not on the PATH: customers reach it through the
+// panel, and the panel runs it as the site's own account.
+func stepWPCLI(ctx context.Context, _ *Options) error {
+	dir := filepath.Dir(actions.WPCLIPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	want, err := run.Cmd(ctx, []string{"curl", "-fsSL", "--max-time", "60", wpCLISumURL})
+	if err != nil {
+		return fmt.Errorf("fetch WP-CLI checksum: %w", err)
+	}
+	expected := strings.Fields(want.Stdout)
+	if len(expected) == 0 || len(expected[0]) != 128 {
+		return fmt.Errorf("WP-CLI checksum endpoint returned something unexpected: %q",
+			firstLineOf(want.Stdout))
+	}
+
+	// Downloaded beside the destination and renamed, so an interrupted
+	// download never leaves a half-written phar that looks installed.
+	tmp := actions.WPCLIPath + ".part"
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := run.Cmd(ctx, []string{
+		"curl", "-fsSL", "--max-time", "300", "-o", tmp, wpCLIURL,
+	}, run.Timeout(6*time.Minute)); err != nil {
+		return fmt.Errorf("download WP-CLI: %w", err)
+	}
+
+	sum, err := run.Cmd(ctx, []string{"sha512sum", tmp})
+	if err != nil {
+		return err
+	}
+	got := strings.Fields(sum.Stdout)
+	if len(got) == 0 || !strings.EqualFold(got[0], expected[0]) {
+		return fmt.Errorf("WP-CLI checksum mismatch: expected %s, got %s", expected[0], got[0])
+	}
+
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmp, actions.WPCLIPath)
+}
+
+// firstLineOf trims a command's output for an error message.
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func checkFile(path string) func(context.Context, *Options) (bool, error) {
@@ -501,6 +574,13 @@ func stepStartServices(ctx context.Context, _ *Options) error {
 	if err := svc.Enable(ctx, "opanel-agent", true); err != nil {
 		return err
 	}
+	// Restart, not just start. On a re-run the binaries were replaced a few
+	// steps ago and the services are already up -- on the old ones. Leaving
+	// them running is the worst kind of upgrade bug: everything reports
+	// success and nothing has changed.
+	if err := svc.Restart(ctx, "opanel-agent"); err != nil {
+		return err
+	}
 	// The API refuses nothing when the agent is slow to appear, but starting
 	// it before the socket exists produces an alarming warning on every fresh
 	// install.
@@ -510,7 +590,10 @@ func stepStartServices(ctx context.Context, _ *Options) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return svc.Enable(ctx, "opanel-api", true)
+	if err := svc.Enable(ctx, "opanel-api", true); err != nil {
+		return err
+	}
+	return svc.Restart(ctx, "opanel-api")
 }
 
 func idsOf(username, group string) (int, int, error) {

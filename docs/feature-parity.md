@@ -1,6 +1,6 @@
 # Đối chiếu tính năng v1 (Python) ↔ v2 (Go)
 
-Cập nhật: 2026-09-14, sau S6 (backup/restore).
+Cập nhật: 2026-09-14, sau WordPress one-click (S7, phần đầu).
 
 **Không có tính năng nào bị xoá.** Toàn bộ code v1 vẫn nằm nguyên trong repo
 (`backend/`, `frontend/`, `installer/install.sh`…) và chưa bị đụng tới. v2 là
@@ -15,9 +15,9 @@ audit log…).
 
 | | Số lượng |
 |---|---|
-| v2 đã xong | **14** |
+| v2 đã xong | **15** |
 | v2 làm dở (có code, thiếu API/UI) | **2** |
-| v2 chưa bắt đầu | **14** |
+| v2 chưa bắt đầu | **13** |
 
 ## Đã xong
 
@@ -37,6 +37,7 @@ audit log…).
 | 12 | **SSL Let's Encrypt cho từng site** — cấp, ép HTTPS, tự gia hạn | Đã kiểm chứng từ internet công cộng |
 | 13 | **File manager** — duyệt, sửa, đổi tên, chmod, tải lên/xuống, xoá | Cô lập bằng `os.Root`, kernel chặn cả symlink escape |
 | 14 | **Backup/restore** — thủ công + theo lịch, retention, tải lên/xuống archive | File + database trong một archive `.tar.gz` mở được bằng `tar` |
+| 15 | **WordPress one-click + WP-CLI** | Tự tạo database, tài khoản DB, cài WP, siết `wp-config.php` |
 
 Ngoài danh sách v1, v2 có thêm: audit log hai lớp, TLS cho panel, cấp cert
 Let's Encrypt in-process, rollback tự động khi apply config hỏng, installer
@@ -53,20 +54,19 @@ một lệnh idempotent.
 
 | # | Tính năng | Phase dự kiến |
 |---|---|---|
-| 1 | SFTP backup target | S7 |
-| 2 | WordPress one-click + WP-CLI | S7 (tiếp theo) |
-| 3 | Editor cấu hình PHP theo version | S7 |
-| 4 | Auto-tuner PHP/LSPHP (OPcache, LSAPI worker) | S7 |
-| 5 | Auto-tuner MariaDB | S7 |
-| 6 | phpMyAdmin SSO (database engine đã xong) | S7 |
-| 7 | API/UI tường lửa | S8 |
-| 8 | WAF/ModSecurity + HTTP flood | S8 |
-| 9 | Quét mã độc (ClamAV + LMD) | S8 |
-| 10 | Cron manager | S9 |
-| 11 | Dashboard tài nguyên CPU/RAM/disk/network | S9 |
-| 12 | Terminal | S9 |
-| 13 | Quản lý cập nhật OS | S9 |
-| 14 | Provisioning + module WHMCS, import backup DirectAdmin | S10 |
+| 1 | Editor cấu hình PHP theo version | S7 (tiếp theo) |
+| 2 | Auto-tuner PHP/LSPHP (OPcache, LSAPI worker) | S7 |
+| 3 | Auto-tuner MariaDB | S7 |
+| 4 | phpMyAdmin SSO (database engine đã xong) | S7 |
+| 5 | SFTP backup target | S7 |
+| 6 | API/UI tường lửa | S8 |
+| 7 | WAF/ModSecurity + HTTP flood | S8 |
+| 8 | Quét mã độc (ClamAV + LMD) | S8 |
+| 9 | Cron manager | S9 |
+| 10 | Dashboard tài nguyên CPU/RAM/disk/network | S9 |
+| 11 | Terminal | S9 |
+| 12 | Quản lý cập nhật OS | S9 |
+| 13 | Provisioning + module WHMCS, import backup DirectAdmin | S10 |
 
 Ghi chú: cột "Phase" theo bảng S1–S11 trong `docs/PLAN-v2-golang.md`. WAF hiện
 chỉ có cột `waf_enabled` trong DB và cờ trong renderer — chưa có engine nào
@@ -85,10 +85,10 @@ installer, WHMCS và các module bảo mật.
 
 Thứ tự phase gốc trong plan tối ưu cho "dựng nền chắc trước". Thứ tự đang chạy
 là thứ tự bán được hàng: database → user → package → SSL từng site → file
-manager → backup/restore. Với sáu thứ đó thì đã có thể nhận khách thật: tạo
-tài khoản, gán gói, dựng site có HTTPS, khách tự sửa file, và dữ liệu có
-đường lùi.
+manager → backup/restore → WordPress one-click. Với bảy thứ đó thì đã có thể
+nhận khách thật: tạo tài khoản, gán gói, dựng site có HTTPS, cài WordPress
+một nút, khách tự sửa file, và dữ liệu có đường lùi.
 
-Thứ tiếp theo là **WordPress one-click**, vì phần lớn khách mua hosting là để
-chạy WordPress, và ngay sau đó là **tường lửa có API/UI** — hiện ruleset dựng
-lúc cài rồi bỏ đó, không quản lý được.
+Thứ tiếp theo là **editor cấu hình PHP** (khách WordPress nào cũng đụng tới
+`upload_max_filesize` và `memory_limit`), rồi **tường lửa có API/UI** — hiện
+ruleset dựng lúc cài rồi bỏ đó, không quản lý được.

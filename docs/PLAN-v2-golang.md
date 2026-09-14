@@ -506,7 +506,7 @@ trước WordPress installer, còn file manager được kéo lên trước back
 | **S4** | SSL cho từng site + auto-renew | ✅ xong | Không có HTTPS thì không bán được năm 2026 |
 | **S5** | File manager | ✅ xong | Khách cần sửa file mà không phải mở SFTP client |
 | **S6** | Backup + restore + lịch | ✅ xong | Khách không giao dữ liệu cho nhà cung cấp không có backup |
-| **S7** | WordPress one-click + WP-CLI, editor PHP ini, tuner PHP/MariaDB, phpMyAdmin SSO | tiếp theo | Phần lớn khách mua hosting là để chạy WordPress |
+| **S7** | WordPress one-click + WP-CLI ✅, editor PHP ini, tuner PHP/MariaDB, phpMyAdmin SSO | đang làm | Phần lớn khách mua hosting là để chạy WordPress |
 | **S8** | Firewall API/UI, WAF, quét mã độc | | Lấp phần đang làm dở, rồi tới bảo mật |
 | **S9** | Cron, dashboard tài nguyên, terminal, update OS | | Vận hành, làm sau khi đã có doanh thu |
 | **S10** | API token endpoint + provisioning + module WHMCS + import DirectAdmin | | Thu tiền tự động và kéo khách từ host khác |

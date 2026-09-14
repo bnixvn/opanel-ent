@@ -31,6 +31,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/tlsx"
 	"github.com/bnixvn/opanel-ent/internal/version"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
+	"github.com/bnixvn/opanel-ent/internal/wordpress"
 )
 
 func main() {
@@ -88,7 +89,8 @@ func run(cfg *config.Config, log *slog.Logger) error {
 	userSvc := panelusers.New(database, ac, log)
 	fileSvc := filemanager.New(database, ac, log)
 	backupSvc := backups.New(database, ac, log)
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, log)
+	wpSvc := wordpress.New(database, ac, dbSvc, log)
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, log)
 	api.StartBackgroundTasks(ctx)
 
 	srv := api.HTTPServer()

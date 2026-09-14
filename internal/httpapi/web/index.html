@@ -159,12 +159,21 @@
       <div class="card">
         <h2>Sites</h2>
         <div class="scroll"><table id="sitesTable">
-          <thead><tr><th>Domain</th><th>Owner</th><th>Type</th><th>PHP</th><th>SSL</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Domain</th><th>Owner</th><th>Type</th><th>PHP</th><th>SSL</th><th>App</th><th>Status</th><th></th></tr></thead>
           <tbody></tbody>
         </table></div>
         <div class="empty hidden" id="sitesEmpty">No sites yet.</div>
       </div>
     </section>
+
+    <div class="card hidden" id="wpResult">
+      <h2>WordPress is installed</h2>
+      <p class="muted" style="margin:0 0 .7rem;font-size:.85rem">
+        The administrator password is shown here once. The panel keeps no copy
+        it can read back, so save it now.</p>
+      <dl class="kv" id="wpResultBody"></dl>
+      <p style="margin:.8rem 0 0"><button class="act" id="wpResultClose">Close</button></p>
+    </div>
 
     <section data-panel="databases" class="hidden">
       <div class="card">
@@ -598,6 +607,7 @@ async function loadSites() {
       `<td>${esc(s.app_type)}</td>` +
       `<td>${phpCell}</td>` +
       `<td>${sslCell(s)}</td>` +
+      `<td data-wp="${s.id}" class="muted">\u2014</td>` +
       `<td>${s.suspended ? tag("suspended", "warn") : tag("active", "ok")}</td>` +
       `<td style="text-align:right;white-space:nowrap">` +
         `<button class="act" data-suspend="${s.id}" data-to="${s.suspended ? 0 : 1}">` +
@@ -612,6 +622,8 @@ async function loadSites() {
       method: "PATCH", body: JSON.stringify({ php_version: sel.value }),
     }), `PHP set to ${sel.value}`);
   }));
+  loadWordPressCells(sites, tb);
+
   $$("[data-ssl]", tb).forEach(b => b.addEventListener("click", async () => {
     const force = confirm(
       `Get a Let's Encrypt certificate for ${b.dataset.domain}?\n\n` +
@@ -674,6 +686,91 @@ $("#newSite").addEventListener("submit", async e => {
 
 $("#nsType").addEventListener("change", () =>
   $("#nsPhp").disabled = $("#nsType").value === "static");
+
+/* ---------- wordpress ---------- */
+
+// The application in a site's document root is a question for the agent, so
+// it is asked per row after the table is on screen rather than holding up the
+// whole listing behind one stat call per site.
+function loadWordPressCells(sites, tb) {
+  for (const s of sites) {
+    if (s.app_type !== "wordpress") {
+      const cell = $(`[data-wp="${s.id}"]`, tb);
+      if (cell) cell.textContent = "\u2014";
+      continue;
+    }
+    api(`/sites/${s.id}/wordpress`).then(res => {
+      const cell = $(`[data-wp="${s.id}"]`, tb);
+      if (!cell) return;
+      const wp = res.wordpress;
+      if (wp.installed) {
+        cell.innerHTML = tag(`WP ${esc(wp.version || "")}`.trim(), "ok") +
+          `<br><a href="${s.ssl_enabled ? "https" : "http"}://${esc(s.domain)}/wp-admin/" ` +
+          `target="_blank" rel="noopener" style="font-size:.8em">wp-admin</a>`;
+        return;
+      }
+      if (!wp.cli_ready) {
+        cell.innerHTML = '<span class="muted" style="font-size:.85em">WP-CLI missing</span>';
+        return;
+      }
+      if (!wp.empty) {
+        cell.innerHTML = '<span class="muted" style="font-size:.85em">has files</span>';
+        return;
+      }
+      cell.innerHTML = `<button class="act" data-wpgo="${s.id}" ` +
+        `data-domain="${esc(s.domain)}" data-ssl="${s.ssl_enabled ? 1 : 0}">Install WordPress</button>`;
+      $(`[data-wpgo="${s.id}"]`, tb).addEventListener("click", ev => installWordPress(ev.target));
+    }).catch(() => {});
+  }
+}
+
+async function installWordPress(btn) {
+  const domain = btn.dataset.domain;
+  const https = btn.dataset.ssl === "1";
+  if (!confirm(
+    `Install WordPress on ${domain}?\n\n` +
+    `This creates a database and a database account for it, downloads ` +
+    `WordPress and runs the installer. It takes a minute or two.\n\n` +
+    (https
+      ? `The site will be set up on https://${domain}.`
+      : `This site has no certificate yet, so WordPress will be set up on ` +
+        `http://${domain}. Turning SSL on afterwards means changing the site ` +
+        `address inside WordPress as well \u2014 it is easier to get the ` +
+        `certificate first.`))) return;
+
+  btn.disabled = true;
+  btn.textContent = "Installing\u2026";
+  note("#msg", `Installing WordPress on ${domain}. Leave the page open.`, "ok");
+  try {
+    const res = await api(`/sites/${btn.dataset.wpgo}/wordpress`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    showWordPressResult(domain, res.wordpress);
+    note("#msg", "", "ok");
+  } catch (err) {
+    note("#msg", err.message);
+  }
+  await loadSites();
+}
+
+function showWordPressResult(domain, wp) {
+  const rows = [
+    ["Site", `<a href="${esc(wp.site_url)}" target="_blank" rel="noopener">${esc(wp.site_url)}</a>`],
+    ["Dashboard", `<a href="${esc(wp.admin_url)}" target="_blank" rel="noopener">${esc(wp.admin_url)}</a>`],
+    ["Administrator", `<code>${esc(wp.admin_user)}</code>`],
+    ["Password", `<code>${esc(wp.admin_password)}</code>`],
+    ["Database", `<code>${esc(wp.database)}</code>`],
+    ["Database user", `<code>${esc(wp.database_user)}</code>`],
+    ["WordPress", esc(wp.version || "")],
+  ];
+  $("#wpResultBody").innerHTML = rows
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+  $("#wpResult").classList.remove("hidden");
+  $("#wpResult").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#wpResultClose").addEventListener("click", () =>
+  $("#wpResult").classList.add("hidden"));
 
 /* ---------- databases ---------- */
 

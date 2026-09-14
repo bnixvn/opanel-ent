@@ -24,6 +24,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
+	"github.com/bnixvn/opanel-ent/internal/wordpress"
 )
 
 type fixture struct {
@@ -65,7 +66,8 @@ func newFixture(t *testing.T) *fixture {
 	userSvc := panelusers.New(database, ac, discardLogger())
 	fileSvc := filemanager.New(database, ac, discardLogger())
 	backupSvc := backups.New(database, ac, discardLogger())
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, discardLogger())
+	wpSvc := wordpress.New(database, ac, dbSvc, discardLogger())
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, backupSvc, wpSvc, discardLogger())
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
 

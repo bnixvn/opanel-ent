@@ -19,6 +19,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/sites"
+	"github.com/bnixvn/opanel-ent/internal/wordpress"
 )
 
 // Server holds the dependencies every handler needs.
@@ -33,6 +34,7 @@ type Server struct {
 	plans     *plans.Service
 	files     *filemanager.Service
 	backups   *backups.Service
+	wordpress *wordpress.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -41,7 +43,7 @@ type Server struct {
 
 // New builds the API server and its route table.
 func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service, fileSvc *filemanager.Service,
-	backupSvc *backups.Service, log *slog.Logger) *Server {
+	backupSvc *backups.Service, wpSvc *wordpress.Service, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -56,6 +58,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		plans:     planSvc,
 		files:     fileSvc,
 		backups:   backupSvc,
+		wordpress: wpSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -93,6 +96,8 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/sites/{id}", s.handleSiteGet)
 			pr.Patch("/sites/{id}", s.handleSiteUpdate)
 			pr.Delete("/sites/{id}", s.handleSiteDelete)
+			pr.Get("/sites/{id}/wordpress", s.handleWordPressStatus)
+			pr.Post("/sites/{id}/wordpress", s.handleWordPressInstall)
 			pr.Post("/sites/{id}/certificate", s.handleSiteCertificate)
 			pr.Delete("/sites/{id}/certificate", s.handleSiteCertificateDelete)
 
