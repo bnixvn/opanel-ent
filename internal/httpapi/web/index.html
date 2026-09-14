@@ -122,6 +122,7 @@
       <button data-tab="sites" aria-current="page">Sites</button>
       <button data-tab="databases">Databases</button>
       <button data-tab="files">Files</button>
+      <button data-tab="backups">Backups</button>
       <button data-tab="php">PHP</button>
       <button data-tab="users" data-staff>Users</button>
       <button data-tab="plans" data-staff>Packages</button>
@@ -288,6 +289,90 @@
           <button class="act" id="edClose">Close</button>
           <span class="muted" id="edInfo" style="margin-left:.6rem"></span>
         </p>
+      </div>
+    </section>
+
+    <section data-panel="backups" class="hidden">
+      <div class="card">
+        <div class="row" style="align-items:end">
+          <div class="field" id="bkOwnerWrap" style="flex:0 0 12rem">
+            <label for="bkOwner">Account</label>
+            <select id="bkOwner" style="width:100%"></select>
+          </div>
+          <div class="field" style="flex:0 0 auto">
+            <label>Include</label>
+            <label style="display:inline;font-size:.85rem;color:var(--ink)">
+              <input type="checkbox" id="bkFiles" checked style="min-width:auto"> files</label>
+            <label style="display:inline;font-size:.85rem;color:var(--ink);margin-left:.7rem">
+              <input type="checkbox" id="bkDbs" checked style="min-width:auto"> databases</label>
+          </div>
+          <div>
+            <button class="act primary" id="bkNow">Back up now</button>
+            <button class="act" id="bkRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="bkMsg" style="margin-top:.7rem"></div>
+        <p class="muted" style="margin:.4rem 0 0;font-size:.83rem">
+          A backup holds the account's whole home directory and a dump of every
+          database it owns. Archives are kept outside the account, so a
+          compromised site cannot delete them, and they do not count against the
+          disk quota.</p>
+      </div>
+
+      <div class="card">
+        <h2>Automatic backups</h2>
+        <form id="bkSched" class="row" style="align-items:end">
+          <div class="field" style="flex:0 0 9rem">
+            <label for="bsEnabled">Status</label>
+            <select id="bsEnabled" style="width:100%">
+              <option value="0">off</option>
+              <option value="1">on</option>
+            </select></div>
+          <div class="field" style="flex:0 0 9rem">
+            <label for="bsFreq">How often</label>
+            <select id="bsFreq" style="width:100%">
+              <option value="daily">daily</option>
+              <option value="weekly">weekly</option>
+            </select></div>
+          <div class="field hidden" id="bsDayWrap" style="flex:0 0 9rem">
+            <label for="bsDay">Day</label>
+            <select id="bsDay" style="width:100%">
+              <option value="0">Sunday</option><option value="1">Monday</option>
+              <option value="2">Tuesday</option><option value="3">Wednesday</option>
+              <option value="4">Thursday</option><option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select></div>
+          <div class="field" style="flex:0 0 7rem">
+            <label for="bsHour">Hour</label>
+            <select id="bsHour" style="width:100%"></select></div>
+          <div class="field" style="flex:0 0 7rem">
+            <label for="bsKeep">Keep</label>
+            <input id="bsKeep" type="number" min="1" max="60" value="7" style="width:100%"></div>
+          <div>
+            <button class="act primary" type="submit">Save schedule</button>
+            <button class="act" type="button" id="bsOff">Turn off</button>
+          </div>
+        </form>
+        <div id="bsMsg" style="margin-top:.7rem"></div>
+        <p class="muted" id="bsLast" style="margin:.4rem 0 0;font-size:.83rem"></p>
+      </div>
+
+      <div class="card">
+        <h2>Archives</h2>
+        <div class="scroll"><table id="bkTable">
+          <thead><tr><th>Taken</th><th>Account</th><th>Kind</th><th>Contents</th><th>Size</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="bkEmpty">No backups yet.</div>
+
+        <form id="bkUpload" style="margin-top:.9rem">
+          <div class="dropzone">
+            <input type="file" id="bkFile" accept=".gz,.tgz">
+            <button class="act" type="submit">Upload an archive</button>
+            <div class="muted" style="margin-top:.4rem">
+              Brings a .tar.gz written by OPanel back onto this server, ready to restore.</div>
+          </div>
+        </form>
       </div>
     </section>
 
@@ -466,6 +551,7 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.tab === "system") loadSystem();
   if (b.dataset.tab === "databases") loadDatabases();
   if (b.dataset.tab === "files") openFiles();
+  if (b.dataset.tab === "backups") openBackups();
   if (b.dataset.tab === "users") loadUsers();
   if (b.dataset.tab === "plans") loadPlans();
   if (b.dataset.tab === "account") loadAccount();
@@ -1095,6 +1181,208 @@ $("#edSave").addEventListener("click", async () => {
 });
 
 $("#edClose").addEventListener("click", () => $("#editor").classList.add("hidden"));
+
+/* ---------- backups ---------- */
+
+let bkOwner = "", bkLimit = 0, bkPoll = null;
+
+const bkOwnerQ = () => (bkOwner ? "?owner=" + encodeURIComponent(bkOwner) : "");
+
+async function openBackups() {
+  const staff = me.role === "admin" || me.role === "reseller";
+  $("#bkOwnerWrap").classList.toggle("hidden", !staff);
+  if (staff && !$("#bkOwner").options.length) {
+    let list = [];
+    try { list = (await api("/users")).users.filter(u => u.linux_uid); } catch {}
+    $("#bkOwner").innerHTML = list.length
+      ? list.map(u => `<option value="${esc(u.username)}">${esc(u.username)}</option>`).join("")
+      : `<option value="">no hosting accounts yet</option>`;
+    bkOwner = $("#bkOwner").value;
+  }
+  if (!$("#bsHour").options.length) {
+    $("#bsHour").innerHTML = Array.from({ length: 24 }, (_, h) =>
+      `<option value="${h}"${h === 3 ? " selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("");
+  }
+  await Promise.all([loadBackups(), loadSchedule()]);
+}
+
+async function loadBackups() {
+  let data;
+  try { data = await api("/backups" + bkOwnerQ()); }
+  catch (err) { note("#bkMsg", err.message); return; }
+  bkLimit = data.max_upload_bytes;
+
+  const rows = data.backups;
+  const tb = $("#bkTable tbody");
+  tb.innerHTML = "";
+  $("#bkEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#bkTable").classList.toggle("hidden", rows.length === 0);
+
+  for (const b of rows) {
+    const contents = [
+      b.has_files ? "files" : null,
+      b.databases.length ? `${b.databases.length} database${b.databases.length === 1 ? "" : "s"}` : null,
+    ].filter(Boolean).join(" + ") || "\u2014";
+
+    const status = b.status === "ready" ? tag("ready", "ok")
+      : b.status === "running" ? tag("running\u2026", "warn")
+      : tag("failed", "bad");
+
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${new Date(b.created_at).toLocaleString()}<br>` +
+        `<span class="muted" style="font-size:.8em">${esc(b.filename)}</span></td>` +
+      `<td>${esc(b.owner)}</td>` +
+      `<td class="muted">${esc(b.kind)}</td>` +
+      `<td class="muted">${contents}${b.file_count ? `<br>${b.file_count} files` : ""}</td>` +
+      `<td class="muted">${b.size_bytes ? fmtBytes(b.size_bytes) : "\u2014"}</td>` +
+      `<td>${status}${b.error ? `<br><span class="muted" style="font-size:.8em">${esc(b.error)}</span>` : ""}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        (b.status === "ready"
+          ? `<a href="#" data-bkdl="${b.id}">Download</a> ` +
+            `<a href="#" data-bkres="${b.id}" data-name="${esc(b.filename)}" data-owner="${esc(b.owner)}">Restore</a> `
+          : "") +
+        (b.status === "running" ? "" : `<a href="#" data-bkrm="${b.id}" data-name="${esc(b.filename)}">Delete</a>`) +
+      `</td>`;
+    tb.appendChild(tr);
+  }
+
+  $$("[data-bkdl]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    window.location = `/api/backups/${a.dataset.bkdl}/download`;
+  }));
+
+  $$("[data-bkrm]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    if (!confirm(`Delete ${a.dataset.name}?\n\nThe archive is removed from the server for good.`)) return;
+    bkGuard(() => api(`/backups/${a.dataset.bkrm}`, { method: "DELETE" }), "Backup deleted");
+  }));
+
+  $$("[data-bkres]", tb).forEach(a => a.addEventListener("click", async e => {
+    e.preventDefault();
+    if (!confirm(
+      `Restore ${a.dataset.name} over ${a.dataset.owner}?\n\n` +
+      `Files in the archive overwrite the ones on the server, and every database ` +
+      `in it is replaced. Anything the account has changed since this backup was ` +
+      `taken is lost.\n\nThis cannot be undone.`)) return;
+    note("#bkMsg", "Restoring. This can take several minutes \u2014 leave the page open.", "ok");
+    try {
+      const res = await api(`/backups/${a.dataset.bkres}/restore`, { method: "POST" });
+      note("#bkMsg", `Restored ${res.restored_files} files` +
+        (res.restored_databases.length ? ` and ${res.restored_databases.length} database(s)` : ""), "ok");
+    } catch (err) { note("#bkMsg", err.message); }
+    await loadBackups();
+  }));
+
+  // A running backup finishes on the server, not here, so poll while one is
+  // in flight and stop as soon as none are.
+  const running = rows.some(b => b.status === "running");
+  clearTimeout(bkPoll);
+  if (running) bkPoll = setTimeout(loadBackups, 5000);
+}
+
+async function bkGuard(fn, okMsg) {
+  note("#bkMsg", "");
+  try { await fn(); note("#bkMsg", okMsg, "ok"); }
+  catch (err) { note("#bkMsg", err.message); }
+  await loadBackups();
+}
+
+$("#bkOwner").addEventListener("change", () => {
+  bkOwner = $("#bkOwner").value;
+  loadBackups();
+  loadSchedule();
+});
+
+$("#bkRefresh").addEventListener("click", () => loadBackups());
+
+$("#bkNow").addEventListener("click", () =>
+  bkGuard(() => api("/backups" + bkOwnerQ(), {
+    method: "POST",
+    body: JSON.stringify({
+      include_files: $("#bkFiles").checked,
+      include_databases: $("#bkDbs").checked,
+    }),
+  }), "Backup started"));
+
+$("#bkUpload").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = $("#bkFile").files[0];
+  if (!f) { note("#bkMsg", "Choose an archive first"); return; }
+  if (bkLimit && f.size > bkLimit) {
+    note("#bkMsg", `${f.name} is ${fmtBytes(f.size)}, over the ${fmtBytes(bkLimit)} limit.`);
+    return;
+  }
+  const body = new FormData();
+  body.append("file", f, f.name);
+  note("#bkMsg", `Uploading ${f.name}\u2026`, "ok");
+  try {
+    const res = await fetch("/api/backups/upload" + bkOwnerQ(), { method: "POST", body });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || res.statusText);
+    note("#bkMsg", "Archive uploaded", "ok");
+    $("#bkFile").value = "";
+  } catch (err) { note("#bkMsg", err.message); }
+  await loadBackups();
+});
+
+/* ---------- backup schedule ---------- */
+
+async function loadSchedule() {
+  let data;
+  try { data = await api("/backups/schedule" + bkOwnerQ()); }
+  catch (err) { note("#bsMsg", err.message); return; }
+
+  const sc = data.schedule;
+  $("#bsEnabled").value = sc && sc.enabled ? "1" : "0";
+  $("#bsFreq").value = sc ? sc.frequency : "daily";
+  $("#bsDay").value = String(sc ? sc.weekday : 0);
+  $("#bsHour").value = String(sc ? sc.hour : 3);
+  $("#bsKeep").value = String(sc ? sc.keep : 7);
+  $("#bsDayWrap").classList.toggle("hidden", $("#bsFreq").value !== "weekly");
+
+  $("#bsLast").textContent = !sc ? "No automatic backups for this account yet."
+    : sc.last_run_at
+      ? `Last run ${new Date(sc.last_run_at).toLocaleString()}` +
+        (sc.last_error ? ` \u2014 ${sc.last_error}` : "")
+      : "Never run yet.";
+}
+
+$("#bsFreq").addEventListener("change", () =>
+  $("#bsDayWrap").classList.toggle("hidden", $("#bsFreq").value !== "weekly"));
+
+$("#bkSched").addEventListener("submit", async e => {
+  e.preventDefault();
+  note("#bsMsg", "");
+  try {
+    await api("/backups/schedule" + bkOwnerQ(), {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: $("#bsEnabled").value === "1",
+        frequency: $("#bsFreq").value,
+        hour: Number($("#bsHour").value),
+        weekday: Number($("#bsDay").value),
+        keep: Number($("#bsKeep").value) || 7,
+        // The schedule always takes everything. A customer who wants a
+        // partial backup can take one by hand; an automatic backup that
+        // quietly skipped the databases is a trap.
+        include_files: true,
+        include_databases: true,
+      }),
+    });
+    note("#bsMsg", "Schedule saved", "ok");
+  } catch (err) { note("#bsMsg", err.message); }
+  await loadSchedule();
+});
+
+$("#bsOff").addEventListener("click", async () => {
+  note("#bsMsg", "");
+  try {
+    await api("/backups/schedule" + bkOwnerQ(), { method: "DELETE" });
+    note("#bsMsg", "Automatic backups turned off", "ok");
+  } catch (err) { note("#bsMsg", err.message); }
+  await loadSchedule();
+});
 
 /* ---------- packages ---------- */
 

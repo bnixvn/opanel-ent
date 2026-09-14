@@ -373,14 +373,24 @@ Hiện trạng:
 
 Còn thiếu: nén/giải nén in-process, thao tác đệ quy có worker pool, sao chép/di chuyển giữa các thư mục.
 
-### 4.8 Backup
+### 4.8 Backup — đã làm (S6)
 
-- `archive/tar` + `klauspost/compress/zstd`, stream qua `io.Pipe` — không file tạm, không shell ra `tar`
-- Dump SQL qua `mariadb-dump` (streaming stdout, giữ tính tương thích của định dạng)
-- Manifest JSON: version, site, php_version, db list, checksum
-- Scheduler: goroutine ticker, không cần systemd timer riêng
-- SFTP target qua `pkg/sftp`
-- Restore: đọc manifest, dựng lại site + DB + user, regenerate vhost theo backend **hiện tại** (backup tạo trên OLS restore được lên LSWS)
+Đơn vị backup là **tài khoản**, không phải site: restore site mà thiếu database thì site vẫn hỏng, và hai thứ đó chỉ nối với nhau qua tài khoản.
+
+Hiện trạng:
+
+- `archive/tar` + `compress/gzip` stdlib. **Không dùng zstd** như dự định ban đầu: đổi lấy việc mở được bằng `tar` trên bất kỳ máy nào, kể cả máy không chạy panel này. Backup là thứ người ta mở ra vào ngày tồi tệ
+- Layout archive: `manifest.json` (member đầu tiên) → `databases/<name>.sql` → `files/...`. Manifest nằm đầu để `backup.inspect` chỉ phải giải nén một member thay vì cả archive
+- Manifest ghi: format version, owner, home, danh sách site (domain, alias, app_type, php_version, document_root, rewrite_mode), danh sách database. **Không ghi số file** — số đó chỉ biết sau khi đi hết cây thư mục, ghi vào manifest thì phải đẩy manifest xuống cuối. Số file nằm ở row `backups` trong SQLite
+- Dump SQL qua `mariadb-dump --single-transaction --add-drop-database`. `--add-drop-database` khiến restore là **thay thế thật**, không phải merge: bảng tạo sau khi backup sẽ biến mất. Kèm theo đó là mất grant, nên service tự cấp lại grant từ bảng `db_grants` sau khi restore xong
+- Symlink lưu nguyên là symlink, không đi theo: link của khách trỏ tới `/etc` không được kéo cấu hình host vào archive của khách
+- Restore giải nén qua `os.Root` trên home của chủ sở hữu — zip-slip bị kernel chặn, không phải bị hàm kiểm tra path chặn. Archive còn ghi tên chủ sở hữu và restore từ chối nếu không khớp
+- Archive nằm ở `/var/backups/opanel/<owner>/`, root-only. **Không** nằm dưới `/var/lib/opanel`: đó là `StateDirectory` của service API, và systemd chown cả cây đó cho user `opanel` mỗi lần service khởi động
+- Chạy nền: row `backups` ghi trước khi bắt đầu, goroutine gọi agent với budget 2 giờ (`agent.RegisterSlow`), UI poll 5 giây một lần. Row kẹt ở `running` sau khi panel restart được đánh dấu `failed` lúc khởi động
+- Scheduler: goroutine ticker 10 phút. Lịch là "hằng ngày/hằng tuần lúc mấy giờ", không phải cron expression. `Due()` viết theo kiểu "đã tới giờ và chưa chạy trong kỳ này" nên server tắt lúc 3h sáng bật lại lúc 9h vẫn chạy backup, thay vì bỏ qua cả ngày
+- Retention: chỉ xoá backup `scheduled`, không đụng backup người ta tự bấm trước khi làm việc nguy hiểm. Xoá sau khi backup mới đã xong, không xoá trước
+
+Còn thiếu: SFTP target (`pkg/sftp`), restore sang server khác (hiện phải tạo sẵn tài khoản cùng tên), restore chọn từng site.
 
 ### 4.9 Frontend
 
@@ -495,8 +505,8 @@ trước WordPress installer, còn file manager được kéo lên trước back
 | **S3** | Package: giới hạn site, database, dung lượng | ✅ xong | Không có thì không ép được gói |
 | **S4** | SSL cho từng site + auto-renew | ✅ xong | Không có HTTPS thì không bán được năm 2026 |
 | **S5** | File manager | ✅ xong | Khách cần sửa file mà không phải mở SFTP client |
-| **S6** | Backup + restore + lịch + SFTP target | tiếp theo | Khách không giao dữ liệu cho nhà cung cấp không có backup |
-| **S7** | WordPress one-click + WP-CLI, editor PHP ini, tuner PHP/MariaDB, phpMyAdmin SSO | | Phần lớn khách mua hosting là để chạy WordPress |
+| **S6** | Backup + restore + lịch | ✅ xong | Khách không giao dữ liệu cho nhà cung cấp không có backup |
+| **S7** | WordPress one-click + WP-CLI, editor PHP ini, tuner PHP/MariaDB, phpMyAdmin SSO | tiếp theo | Phần lớn khách mua hosting là để chạy WordPress |
 | **S8** | Firewall API/UI, WAF, quét mã độc | | Lấp phần đang làm dở, rồi tới bảo mật |
 | **S9** | Cron, dashboard tài nguyên, terminal, update OS | | Vận hành, làm sau khi đã có doanh thu |
 | **S10** | API token endpoint + provisioning + module WHMCS + import DirectAdmin | | Thu tiền tự động và kéo khách từ host khác |

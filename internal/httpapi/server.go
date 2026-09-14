@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
+	"github.com/bnixvn/opanel-ent/internal/backups"
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
@@ -31,6 +32,7 @@ type Server struct {
 	users     *panelusers.Service
 	plans     *plans.Service
 	files     *filemanager.Service
+	backups   *backups.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -39,7 +41,7 @@ type Server struct {
 
 // New builds the API server and its route table.
 func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service, fileSvc *filemanager.Service,
-	log *slog.Logger) *Server {
+	backupSvc *backups.Service, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -53,6 +55,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		users:     userSvc,
 		plans:     planSvc,
 		files:     fileSvc,
+		backups:   backupSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -130,6 +133,19 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/files/download", s.handleFileDownload)
 			pr.Delete("/files", s.handleFileDelete)
 
+			// Backups. Same ownership rule as files: the service decides
+			// whose account is in play, so an end user sees only their own.
+			pr.Get("/backups", s.handleBackupList)
+			pr.Post("/backups", s.handleBackupCreate)
+			pr.Post("/backups/upload", s.handleBackupUpload)
+			pr.Get("/backups/schedule", s.handleScheduleGet)
+			pr.Put("/backups/schedule", s.handleScheduleSave)
+			pr.Delete("/backups/schedule", s.handleScheduleDelete)
+			pr.Get("/backups/{id}", s.handleBackupGet)
+			pr.Get("/backups/{id}/download", s.handleBackupDownload)
+			pr.Post("/backups/{id}/restore", s.handleBackupRestore)
+			pr.Delete("/backups/{id}", s.handleBackupDelete)
+
 			pr.Get("/php/versions", s.handlePHPList)
 			pr.Get("/webserver/status", s.handleWebserverStatus)
 
@@ -194,8 +210,52 @@ func (s *Server) HTTPServer() *http.Server {
 
 // StartBackgroundTasks runs periodic housekeeping until ctx is cancelled.
 func (s *Server) StartBackgroundTasks(ctx context.Context) {
+	// A row left at "running" by a restart describes a backup that is not
+	// coming back; say so rather than showing a spinner for ever.
+	if n, err := s.db.MarkStaleBackupsFailed(ctx); err != nil {
+		s.log.Warn("httpapi: cannot close out interrupted backups", "err", err)
+	} else if n > 0 {
+		s.log.Warn("httpapi: marked interrupted backups as failed", "count", n)
+	}
+
 	go s.purgeSessionsLoop(ctx)
 	go s.renewCertificatesLoop(ctx)
+	go s.backupScheduleLoop(ctx)
+}
+
+// backupScheduleLoop fires due schedules and prunes what retention no longer
+// needs.
+//
+// Every ten minutes rather than on the hour: the sweep has to catch a server
+// that was down at 3am, and Due() is written so a late tick still runs the
+// backup instead of skipping the day.
+func (s *Server) backupScheduleLoop(ctx context.Context) {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			started, errs := s.backups.RunDue(ctx, now)
+			for _, err := range errs {
+				s.log.Error("httpapi: scheduled backup", "err", err)
+			}
+			if started > 0 {
+				s.log.Info("httpapi: scheduled backups started", "count", started)
+			}
+			// Pruning waits a tick behind the run that produced the newest
+			// archive, so retention never deletes the oldest copy while its
+			// replacement is still being written.
+			removed, perrs := s.backups.Prune(ctx)
+			for _, err := range perrs {
+				s.log.Warn("httpapi: backup retention", "err", err)
+			}
+			if removed > 0 {
+				s.log.Info("httpapi: pruned backups", "count", removed)
+			}
+		}
+	}
 }
 
 func (s *Server) purgeSessionsLoop(ctx context.Context) {

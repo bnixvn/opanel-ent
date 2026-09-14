@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/distro"
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
@@ -283,6 +284,10 @@ func stepDirectories(_ context.Context, _ *Options) error {
 		{DataDir, 0o750, svcUID, svcGID},
 		{filepath.Join(DataDir, "webserver"), 0o750, svcUID, svcGID},
 		{ConfigDir, 0o755, 0, 0},
+		// Backups are root-only: the API reaches them through the agent, and
+		// nothing else on the host has any business reading one account's
+		// archive, let alone deleting it.
+		{actions.BackupRoot, 0o700, 0, 0},
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.mode); err != nil {

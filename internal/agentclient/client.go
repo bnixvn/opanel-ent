@@ -35,6 +35,13 @@ func New(path string, timeout time.Duration) *Client {
 // Socket returns the configured socket path.
 func (c *Client) Socket() string { return c.socket }
 
+// WithTimeout returns a client for the same socket with a different deadline.
+// Used for the few actions -- backup, restore -- that are expected to run for
+// minutes, without loosening the deadline that protects every other call.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	return &Client{socket: c.socket, timeout: d}
+}
+
 // Error is a failure reported by the agent, carrying its machine-readable code.
 type Error struct {
 	Action string

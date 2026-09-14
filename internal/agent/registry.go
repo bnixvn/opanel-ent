@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // handler is the type-erased form of a registered action.
 type handler struct {
 	version int
+	// timeout overrides the server's default budget. Zero means use it.
+	timeout time.Duration
 	fn      func(context.Context, json.RawMessage) (any, error)
 }
 
@@ -34,6 +37,22 @@ func NewRegistry() *Registry {
 // It panics on a duplicate name: that is a programming error discovered at
 // startup, not a runtime condition.
 func Register[In, Out any](r *Registry, name string, version int, fn func(context.Context, In) (Out, error)) {
+	register(r, name, version, 0, fn)
+}
+
+// RegisterSlow is Register for an action that legitimately takes longer than
+// the server's default budget -- archiving a customer's whole home directory,
+// restoring one, dumping a large database. Without it the only ways to allow
+// those are to raise the budget for every action, which lets a wedged handler
+// hold a slot for an hour, or to build a job queue, which is a lot of
+// machinery for a handful of operations.
+func RegisterSlow[In, Out any](r *Registry, name string, version int, timeout time.Duration,
+	fn func(context.Context, In) (Out, error)) {
+	register(r, name, version, timeout, fn)
+}
+
+func register[In, Out any](r *Registry, name string, version int, timeout time.Duration,
+	fn func(context.Context, In) (Out, error)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, dup := r.actions[name]; dup {
@@ -41,6 +60,7 @@ func Register[In, Out any](r *Registry, name string, version int, fn func(contex
 	}
 	r.actions[name] = handler{
 		version: version,
+		timeout: timeout,
 		fn: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in In
 			if len(raw) > 0 {
@@ -77,6 +97,18 @@ func (e *PayloadError) Unwrap() error { return e.Err }
 type DeniedError struct{ Reason string }
 
 func (e *DeniedError) Error() string { return "denied: " + e.Reason }
+
+// Budget returns how long the named action may run, falling back to def for
+// an action that did not ask for more (and for one that does not exist -- the
+// lookup that follows reports that properly).
+func (r *Registry) Budget(name string, def time.Duration) time.Duration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if h, ok := r.actions[name]; ok && h.timeout > 0 {
+		return h.timeout
+	}
+	return def
+}
 
 // lookup resolves an action and checks the requested version.
 func (r *Registry) lookup(name string, version int) (handler, error) {

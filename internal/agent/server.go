@@ -194,6 +194,12 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	// Now that the action is known, give the connection the budget that
+	// action actually has. The deadline set above was a guess made before
+	// reading the request, and it is too short for a backup.
+	budget := s.opts.Registry.Budget(req.Action, s.opts.ActionTimeout)
+	_ = conn.SetDeadline(time.Now().Add(budget + 30*time.Second))
+
 	select {
 	case s.sem <- struct{}{}:
 		defer func() { <-s.sem }()
@@ -237,7 +243,7 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 		return Response{ID: req.ID, OK: false, Code: code, Error: err.Error()}
 	}
 
-	actx, cancel := context.WithTimeout(ctx, s.opts.ActionTimeout)
+	actx, cancel := context.WithTimeout(ctx, s.opts.Registry.Budget(req.Action, s.opts.ActionTimeout))
 	defer cancel()
 
 	out, err := h.fn(actx, req.Payload)

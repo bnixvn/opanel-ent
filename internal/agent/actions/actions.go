@@ -33,6 +33,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerDatabases(r)
 	registerQuota(r)
 	registerFiles(r)
+	registerBackup(r)
 }
 
 // PingResult is the reply to "ping".
