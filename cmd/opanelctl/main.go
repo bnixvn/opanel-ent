@@ -43,6 +43,8 @@ Usage:
   opanelctl user create-admin <name>    create an administrator
   opanelctl user create <name> <role>   create a user (admin|reseller|end_user)
   opanelctl user list                   list panel users
+  opanelctl passkeys off                stop asking for passkeys, server-wide
+  opanelctl passkeys forget <name>      remove one account's passkeys
   opanelctl cert issue <domain> [email] obtain a Let's Encrypt certificate
                        [--staging] [--panel]
 
@@ -86,6 +88,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return cmdUser(ctx, args[1:])
 	case "cert":
 		return cmdCert(ctx, args[1:])
+	case "passkeys":
+		return cmdPasskeys(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q (try: opanelctl -h)", args[0])
 	}
@@ -448,6 +452,61 @@ func cmdUser(ctx context.Context, args []string) error {
 		return listUsers(ctx)
 	default:
 		return fmt.Errorf("user: unknown subcommand %q", args[0])
+	}
+}
+
+// cmdPasskeys is the way back in when a passkey cannot be produced.
+//
+// A passkey is a second factor, so an account that registered one and then
+// lost the device has no way to sign in -- and if that account is the only
+// administrator, nobody does. Every other lever in this panel is behind a
+// login, which is exactly the thing that is not working, so this one is on
+// the command line where a person with the server has it and a person with
+// the password does not.
+func cmdPasskeys(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("passkeys: want 'off' or 'forget <username>'")
+	}
+	_, database, err := openDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+
+	switch args[0] {
+	case "off":
+		// The setting rather than the credentials: nothing is destroyed, and
+		// an administrator who finds their key again turns it back on from
+		// Settings.
+		if err := database.SetSetting(ctx, "passkey.enabled", ""); err != nil {
+			return err
+		}
+		fmt.Println("Passkeys will not be asked for. Registered keys are kept;")
+		fmt.Println("turn them back on under Settings once you can sign in.")
+		return nil
+
+	case "forget":
+		if len(args) < 2 {
+			return errors.New("passkeys: want 'forget <username>'")
+		}
+		user, err := database.UserByUsername(ctx, args[1])
+		if err != nil {
+			return fmt.Errorf("passkeys: no such user %q", args[1])
+		}
+		keys, err := database.PasskeysFor(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if err := database.DeletePasskey(ctx, user.ID, k.ID); err != nil {
+				return err
+			}
+		}
+		fmt.Printf("Removed %d passkey(s) from %s.\n", len(keys), user.Username)
+		return nil
+
+	default:
+		return fmt.Errorf("passkeys: unknown subcommand %q", args[0])
 	}
 }
 

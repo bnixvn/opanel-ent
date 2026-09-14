@@ -78,6 +78,23 @@ func (s *Server) checkPasskeyFactor(w http.ResponseWriter, r *http.Request, user
 	}
 	wu := &passkey.User{Account: user, Credentials: keys}
 
+	// The code, when the account also has one and somebody typed it.
+	//
+	// Without this the passkey is not the strongest factor, it is the only
+	// one: an account that has registered one and then lost the device is
+	// locked out of its own server, and the form offering a code box is a
+	// lie because the code can never be reached. A second factor that cannot
+	// be replaced is a way to lose a server, not a way to protect one.
+	if user.TOTPEnabled && req.Code != "" {
+		if err := s.auth.CheckSecondFactor(r.Context(), user, req.Code); err == nil {
+			s.audit(r, "auth.login", user.Username, true, "two-factor code instead of passkey")
+			return true
+		}
+		s.audit(r, "auth.login", user.Username, false, "second factor rejected")
+		writeError(w, http.StatusUnauthorized, "totp_invalid", "invalid two-factor code")
+		return false
+	}
+
 	// Nothing came back yet: start the ceremony and tell the browser which
 	// credentials this account has.
 	if req.PasskeyChallengeID == "" || len(req.PasskeyCredential) == 0 {

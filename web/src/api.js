@@ -34,7 +34,18 @@ async function request(path, { method = 'GET', body, raw, signal } = {}) {
 
   const res = await fetch('/api' + path, opts);
 
-  if (res.status === 401) {
+  // A 401 from signing in is an answer, not an expiry. The sign-in exchange
+  // uses them to say "now the second factor" and "that was wrong", and
+  // treating those as a dead session logged the person out of a session they
+  // did not have yet -- which is what "your session has ended" meant on a
+  // login page, and why enabling passkeys appeared to break signing in.
+  //
+  // Everywhere else a 401 does mean the session is gone, and the message is
+  // worth keeping: it is the only one the user sees when a tab has been open
+  // overnight.
+  const signingIn = path === '/auth/login';
+
+  if (res.status === 401 && !signingIn) {
     onUnauthorized();
     throw new ApiError('Your session has ended. Sign in again.', { status: 401 });
   }
