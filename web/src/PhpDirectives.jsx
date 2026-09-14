@@ -1,4 +1,5 @@
 import React from 'react';
+import { Hint } from './components.jsx';
 
 // PhpDirectives renders a php.ini form from the catalogue the API returns.
 //
@@ -78,11 +79,12 @@ function Field({ directive: d, value, onChange }) {
       <label htmlFor={id}>
         {d.label}
         {d.staff_only && <> <span className="muted" style={{ fontWeight: 400 }}>(staff)</span></>}
+        <Hint>
+          {d.name}
+          {d.help ? ` — ${d.help}` : ''}
+        </Hint>
       </label>
       {input}
-      <div className="muted" style={{ fontSize: '.78rem' }}>
-        <code>{d.name}</code>{d.help ? ` — ${d.help}` : ''}
-      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, setUnauthorizedHandler } from './api.js';
 import Login from './Login.jsx';
 import Sites from './pages/Sites.jsx';
@@ -20,39 +20,18 @@ import Php from './pages/Php.jsx';
 import System from './pages/System.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
+import Dashboard from './pages/Dashboard.jsx';
+import { FEATURES } from './features.js';
 
-// The menu. `roles` lists who sees an entry; the API enforces the same rule,
-// so hiding one is a convenience and never the protection.
-//
-// Three groups rather than four, and the two that grew longest are cut down:
-// a sidebar somebody has to read is one they stop reading. What a customer
-// touches daily is at the top with no heading; what an operator touches
-// occasionally is below one.
+
+// The sidebar is the four headings and nothing else. Everything under them
+// is one click away on the dashboard, which is what it is for; a sidebar
+// long enough to need reading is one people stop reading.
 const MENU = [
-  { group: '', items: [
-    { to: '/', label: 'Websites', end: true },
-    { to: '/wordpress', label: 'WordPress' },
-    { to: '/databases', label: 'Databases' },
-    { to: '/files', label: 'Files' },
-    { to: '/backups', label: 'Backups' },
-    { to: '/ssl', label: 'SSL' },
-    { to: '/security/malware', label: 'Malware' },
-    { to: '/cron', label: 'Cron' },
-    { to: '/logs', label: 'Logs' },
-  ] },
-  { group: 'Server', roles: ['admin', 'reseller'], items: [
-    { to: '/users', label: 'Users', roles: ['admin', 'reseller'] },
-    { to: '/packages', label: 'Packages', roles: ['admin', 'reseller'] },
-    { to: '/import', label: 'Import', roles: ['admin', 'reseller'] },
-    { to: '/security/firewall', label: 'Firewall', roles: ['admin'] },
-    { to: '/security/waf', label: 'WAF', roles: ['admin'] },
-    { to: '/php', label: 'PHP', roles: ['admin'] },
-    { to: '/system', label: 'System', roles: ['admin'] },
-    { to: '/settings', label: 'Settings', roles: ['admin'] },
-  ] },
-  { group: 'You', items: [
-    { to: '/account', label: 'Account' },
-  ] },
+  { to: '/', label: 'Dashboard', end: true },
+  { to: '/sites', label: 'Main' },
+  { to: '/users', label: 'Server', roles: ['admin', 'reseller'] },
+  { to: '/account', label: 'Account' },
 ];
 
 function visible(entry, role) {
@@ -64,6 +43,14 @@ export default function App() {
   const [brand, setBrand] = useState({ name: 'OPanel' });
   const [loading, setLoading] = useState(true);
   const [quota, setQuota] = useState(null);
+  // The server's own address, shown in the top bar: on a panel reached by a
+  // name, the address is the thing somebody needs when they go to point a
+  // domain at it.
+  const [host, setHost] = useState({});
+  const accountMenu = useRef(null);
+  const closeAccountMenu = () => {
+    if (accountMenu.current) accountMenu.current.open = false;
+  };
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -104,7 +91,11 @@ export default function App() {
     // A quota that is configured but not enforced is the kind of thing an
     // operator must be told about every time, not once.
     api.get('/quota/status').then(setQuota).catch(() => setQuota(null));
+    api.get('/system/address').then(setHost).catch(() => setHost({}));
   }, [me]);
+
+  // A details element stays open when the page changes under it.
+  useEffect(closeAccountMenu, [location.pathname]);
 
   if (loading) return null;
   if (!me) return <Login brand={brand} onSignedIn={setMe} />;
@@ -119,42 +110,18 @@ export default function App() {
           {brand.logo ? <img src={brand.logo} alt={brand.name} /> : brand.name}
         </div>
 
-        {MENU.filter((section) => visible(section, role)).map((section) => {
-          const items = section.items.filter((i) => visible(i, role));
-          if (!items.length) return null;
-          return (
-            <div key={section.group || 'top'}>
-              {section.group && <div className="group">{section.group}</div>}
-              {items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) => (isActive ? 'active' : undefined)}
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </div>
-          );
-        })}
+        {MENU.filter((item) => visible(item, role)).map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) => (isActive ? 'active' : undefined)}
+          >
+            {item.label}
+          </NavLink>
+        ))}
 
         <div className="spacer" />
-        <div className="who">
-          {me.username}
-          <br />
-          <span style={{ opacity: 0.7 }}>{role}</span>
-        </div>
-        <button
-          type="button"
-          style={{ margin: '.5rem .6rem' }}
-          onClick={async () => {
-            try { await api.post('/auth/logout'); } catch { /* signing out anyway */ }
-            signOut();
-          }}
-        >
-          Sign out
-        </button>
       </nav>
 
       <div className="main">
@@ -192,14 +159,38 @@ export default function App() {
 
         <header className="topbar">
           <h1>{title}</h1>
+          <div className="spacer" />
+          {host.ipv4 && (
+            <span className="addr" title="This server's address">{host.ipv4}</span>
+          )}
+          <details className="menu" ref={accountMenu}>
+            <summary>{me.username} ▾</summary>
+            <div className="sheet">
+              <div className="who">
+                Signed in as <strong>{me.username}</strong><br />{role}
+              </div>
+              <Link to="/account" onClick={closeAccountMenu}>Account settings</Link>
+              <button
+                type="button"
+                onClick={async () => {
+                  closeAccountMenu();
+                  try { await api.post('/auth/logout'); } catch { /* signing out anyway */ }
+                  signOut();
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </details>
         </header>
 
         <main className="content">
           <Routes>
-            {/* Websites is the landing page: it is what an operator opens
-                the panel to look at, and a dashboard that only restated the
-                same numbers was a click in the way. */}
-            <Route path="/" element={<Sites me={me} />} />
+            {/* The dashboard is a way in, not a report: it lists what the
+                panel can do, grouped the way the sidebar is. The numbers it
+                used to restate are on the pages that own them. */}
+            <Route path="/" element={<Dashboard me={me} />} />
+            <Route path="/sites" element={<Sites me={me} />} />
             <Route path="/sites/*" element={<Sites me={me} />} />
             <Route path="/databases" element={<Databases me={me} />} />
             <Route path="/wordpress" element={<WordPress me={me} />} />
@@ -243,8 +234,11 @@ export default function App() {
 }
 
 function pageTitle(path) {
-  const found = MENU.flatMap((s) => s.items).find(
-    (i) => (i.end ? path === i.to : path.startsWith(i.to)),
-  );
-  return found ? found.label : 'Websites';
+  if (path === '/') return 'Dashboard';
+  // Longest match first, so /security/malware is not answered by /security.
+  const all = FEATURES.flatMap((g) => g.items)
+    .slice()
+    .sort((a, b) => b.to.length - a.to.length);
+  const found = all.find((i) => path === i.to || path.startsWith(i.to + '/'));
+  return found ? found.label : 'Dashboard';
 }

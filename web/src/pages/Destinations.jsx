@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtDate } from '../api.js';
-import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Hint, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
 // Destinations is where backups are copied to, besides this server.
 //
@@ -211,7 +211,14 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
             </div>
           </div>
           <div className="field">
-            <label htmlFor="dHostKey">The server&apos;s host key</label>
+            <label htmlFor="dHostKey">
+              The server&apos;s host key
+              <Hint>
+                Run “ssh-keyscan -t ed25519 your-host” and paste everything
+                after the address. Without it the panel would hand every
+                customer&apos;s files to whoever answers that address.
+              </Hint>
+            </label>
             <input
               id="dHostKey"
               required
@@ -220,11 +227,6 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
               onChange={set('host_key')}
               style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.8rem' }}
             />
-            <div className="muted" style={{ fontSize: '.78rem' }}>
-              Run <code>ssh-keyscan -t ed25519 your-host</code> and paste
-              everything after the address. Without it the panel would hand
-              every customer&apos;s files to whoever answers that address.
-            </div>
           </div>
           <div className="row">
             <div className="field" style={{ flex: '0 0 12rem' }}>
@@ -237,6 +239,10 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
             <div className="field">
               <label htmlFor="dSecret">
                 {form.secret_kind === 'key' ? 'Private key' : 'Password'}
+                <Hint>
+                  Stored on this server only, readable by root. An encrypted
+                  key needs its passphrase removed first.
+                </Hint>
               </label>
               {form.secret_kind === 'key' ? (
                 <textarea
@@ -251,10 +257,6 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
               ) : (
                 <input id="dSecret" type="password" required value={form.secret} onChange={set('secret')} />
               )}
-              <div className="muted" style={{ fontSize: '.78rem' }}>
-                Stored on this server only, readable by root. An encrypted key
-                needs its passphrase removed first.
-              </div>
             </div>
           </div>
         </>
@@ -267,11 +269,12 @@ function DestinationForm({ admin, onSaved, onCancel, onFailed }) {
             <div className="field" style={{ flex: '0 0 9rem' }}><label htmlFor="dRegion">Region</label>
               <input id="dRegion" placeholder="us-east-1" value={form.region} onChange={set('region')} />
             </div>
-            <div className="field"><label htmlFor="dEndpoint">Endpoint</label>
+            <div className="field">
+              <label htmlFor="dEndpoint">
+                Endpoint
+                <Hint>Leave empty for Amazon. Wasabi, Backblaze, R2 and MinIO all work.</Hint>
+              </label>
               <input id="dEndpoint" placeholder="s3.amazonaws.com" value={form.endpoint} onChange={set('endpoint')} />
-              <div className="muted" style={{ fontSize: '.78rem' }}>
-                Leave empty for Amazon. Wasabi, Backblaze, R2 and MinIO all work.
-              </div>
             </div>
           </div>
           <div className="row">

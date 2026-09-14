@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,11 @@ type PHPIniResult struct {
 }
 
 func registerPHPIni(r *agent.Registry, deps Deps) {
+	agent.Register(r, "php.ini.read", 1,
+		func(ctx context.Context, in PHPVersionRequest) (PHPIniReadResult, error) {
+			return readPHPIni(ctx, deps, in.Version)
+		})
+
 	agent.RegisterSlow(r, "php.ini.write", 1, 5*time.Minute,
 		func(ctx context.Context, in PHPIniRequest) (PHPIniResult, error) {
 			return writePHPIni(ctx, deps, in)
@@ -128,4 +134,106 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+// PHPIniReadResult reports what an interpreter is configured with.
+type PHPIniReadResult struct {
+	Version string `json:"version"`
+	// Values is what the interpreter will start with: php.ini plus every
+	// file in its scan directory, later files winning.
+	Values map[string]string `json:"values"`
+	// Managed is only what the panel's own drop-in sets. The panel replaces
+	// that file wholesale when it writes, so the caller needs to know what
+	// is in it before deciding that an empty form means "set nothing".
+	Managed map[string]string `json:"managed"`
+}
+
+// readPHPIni reads the configuration files rather than asking the
+// interpreter.
+//
+// Asking would be simpler and is wrong: the command-line interpreter
+// overrides several directives for itself -- max_execution_time is 0 on the
+// CLI whatever php.ini says, and ini_get_all reports that as the master
+// value too -- so a panel that asked would tell somebody their websites have
+// no time limit when in fact they have thirty seconds.
+func readPHPIni(_ context.Context, deps Deps, version string) (PHPIniReadResult, error) {
+	out := PHPIniReadResult{
+		Version: version,
+		Values:  map[string]string{},
+		Managed: map[string]string{},
+	}
+	dropIn := deps.PHP.IniDropIn(version)
+	scanDir := filepath.Dir(dropIn)
+	if _, err := os.Stat(scanDir); err != nil {
+		return out, fmt.Errorf("php %s is not installed on this server", version)
+	}
+	mainIni := filepath.Join(filepath.Dir(scanDir), "php.ini")
+
+	wanted := map[string]bool{}
+	for _, d := range phpini.Catalogue() {
+		wanted[d.Name] = true
+	}
+
+	// php.ini first, then the scan directory in the order the interpreter
+	// reads it, which is alphabetical. Later files win, which is why the
+	// panel's own drop-in is named 99-.
+	files := []string{mainIni}
+	if entries, err := os.ReadDir(scanDir); err == nil {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".ini") {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			files = append(files, filepath.Join(scanDir, n))
+		}
+	}
+
+	for _, f := range files {
+		for name, value := range parseIniFile(f, wanted) {
+			out.Values[name] = value
+			if f == dropIn {
+				out.Managed[name] = value
+			}
+		}
+	}
+	return out, nil
+}
+
+// iniLine matches "name = value", with optional quotes and a trailing
+// comment. php.ini is not INI in any strict sense, but the directives this
+// reads are always written this way.
+var iniLine = regexp.MustCompile(`^\s*([A-Za-z0-9_.]+)\s*=\s*(.*)$`)
+
+// parseIniFile pulls the wanted directives out of one file.
+func parseIniFile(path string, wanted map[string]bool) map[string]string {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#") ||
+			strings.HasPrefix(trimmed, "[") {
+			continue
+		}
+		m := iniLine.FindStringSubmatch(trimmed)
+		if m == nil || !wanted[m[1]] {
+			continue
+		}
+		value := strings.TrimSpace(m[2])
+		// A trailing comment, but only one introduced by a semicolon: a
+		// value may legitimately contain a hash.
+		if i := strings.Index(value, ";"); i >= 0 {
+			value = strings.TrimSpace(value[:i])
+		}
+		value = strings.Trim(value, `"'`)
+		if value != "" {
+			out[m[1]] = value
+		}
+	}
+	return out
 }

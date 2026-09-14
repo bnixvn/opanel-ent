@@ -172,6 +172,7 @@ func (s *Server) routes() http.Handler {
 			// reads anyone's with ?user=<id>.
 			pr.Get("/reseller", s.handleResellerSummary)
 			pr.Get("/quota/status", s.handleQuotaStatus)
+			pr.Get("/system/address", s.handleServerAddress)
 
 			// Logs. Scoped to a website the caller owns, because a log holds
 			// visitors' addresses and the paths they asked for.

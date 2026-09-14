@@ -266,3 +266,24 @@ func (s *Server) handleNotificationSet(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "settings.notifications", actor.Username, true, "")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
+
+// handleServerAddress reports the address the panel is reached at.
+//
+// Readable by anyone signed in and deliberately nothing more than the
+// address: it is what somebody needs when they go to point a domain at this
+// server, and having to open Settings to find it is a page nobody but an
+// administrator can open.
+func (s *Server) handleServerAddress(w http.ResponseWriter, r *http.Request) {
+	info, err := agentclient.Call[actions.NetworkInfo](r.Context(), s.agent, "net.info", 1, struct{}{})
+	if err != nil {
+		// Not an error worth a failed request: the top bar simply shows
+		// nothing, which is better than an error banner on every page.
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	out := map[string]any{"ipv4": info.PrimaryIPv4}
+	if info.PrimaryIPv6 != "" {
+		out["ipv6"] = info.PrimaryIPv6
+	}
+	writeJSON(w, http.StatusOK, out)
+}

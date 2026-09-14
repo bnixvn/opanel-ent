@@ -30,9 +30,35 @@ func (s *Server) handlePHPSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	// What this interpreter is actually configured with, so an empty field
+	// shows the value in force on this host rather than a number compiled
+	// into the panel.
+	catalogue := phpini.Catalogue()
+	live, liveErr := agentclient.Call[actions.PHPIniReadResult](r.Context(), s.agent,
+		"php.ini.read", 1, actions.PHPVersionRequest{Version: version})
+	if liveErr == nil {
+		for i := range catalogue {
+			if v, ok := live.Values[catalogue[i].Name]; ok && v != "" {
+				catalogue[i].Default = v
+			}
+		}
+		// The panel replaces its own drop-in wholesale when it saves. If
+		// that file already carries settings the panel does not know about
+		// -- the installer's tuning, most often -- an empty form would
+		// quietly throw them away on the first save. Adopting them once
+		// makes what is on screen what is on disk.
+		if len(values) == 0 && len(live.Managed) > 0 {
+			if adopted, err := phpini.Check(live.Managed); err == nil && len(adopted) > 0 {
+				if err := s.db.ReplacePHPVersionSettings(r.Context(), version, adopted); err == nil {
+					values = adopted
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":    version,
-		"directives": phpini.Catalogue(),
+		"directives": catalogue,
 		"values":     values,
 	})
 }

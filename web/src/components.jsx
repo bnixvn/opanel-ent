@@ -140,3 +140,19 @@ export function Secret({ label, value }) {
     </div>
   );
 }
+
+// Hint is an explanation somebody can ask for.
+//
+// Printed under every field, the same words become noise that hides the ones
+// that matter. As a tooltip they stay one keystroke away, and because the
+// text is in the markup rather than a title attribute it is still read out
+// by a screen reader and still found by a page search.
+export function Hint({ children }) {
+  if (!children) return null;
+  return (
+    <i className="hint" tabIndex={0} role="note">
+      ?
+      <span>{children}</span>
+    </i>
+  );
+}

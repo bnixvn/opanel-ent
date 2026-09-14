@@ -119,6 +119,132 @@ a { color: var(--accent); }
   z-index: 5;
 }
 .topbar h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+.topbar .spacer { flex: 1; }
+.topbar .addr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.22rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* The account menu. A details element rather than a script-driven dropdown:
+   it closes on Escape, it is reachable by keyboard, and it needs no state. */
+.menu { position: relative; }
+.menu > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  user-select: none;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary:hover { border-color: var(--accent); }
+.menu[open] > summary { border-color: var(--accent); }
+.menu .sheet {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  min-width: 12rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  padding: 0.3rem;
+  z-index: 20;
+}
+.menu .sheet a, .menu .sheet button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.87rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+.menu .sheet a:hover, .menu .sheet button:hover {
+  background: var(--bg);
+  color: var(--ink);
+}
+.menu .sheet .who {
+  padding: 0.35rem 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* An explanation somebody can ask for, rather than one printed under every
+   field. The text lives in the markup so it is still read out to a screen
+   reader and still found by a page search. */
+.hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-left: 0.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 600;
+  cursor: help;
+  vertical-align: middle;
+}
+.hint:hover, .hint:focus-visible { border-color: var(--accent); color: var(--accent); }
+.hint > span {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.4rem);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 18rem;
+  background: var(--ink);
+  color: var(--panel);
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+  z-index: 30;
+  pointer-events: none;
+}
+.hint:hover > span, .hint:focus-visible > span { opacity: 1; visibility: visible; }
+
+/* The dashboard: every feature as a card, grouped the way the sidebar is. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.7rem;
+}
+.tile {
+  display: block;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+}
+.tile:hover { border-color: var(--accent); }
+.tile strong { display: block; font-size: 0.93rem; font-weight: 600; }
+.tile span { display: block; margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted); }
 .content { padding: 1.2rem; max-width: 80rem; }
 
 /* ---------- cards, tables, forms ---------- */
@@ -160,8 +286,24 @@ button:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 button.primary:hover { filter: brightness(1.08); }
 button.danger { color: var(--bad); border-color: var(--bad); }
-button.link { border: 0; background: none; color: var(--accent); padding: 0; }
+/* Row actions. Still a button, not a sentence somebody has to notice: the
+   same shape as every other control, only smaller, so a table of them reads
+   as a row of things to press rather than a paragraph of blue words. */
+button.link {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.82rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+button.link:hover { border-color: var(--accent); color: var(--accent); }
+button.link.danger { color: var(--bad); border-color: var(--bad-bg); }
+button.link.danger:hover { border-color: var(--bad); }
 button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Buttons sitting together in a table cell need a little air, and the markup
+   separates them with a space that collapses at some widths. */
+td.right button + button, td button + button { margin-left: 0.25rem; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 th {

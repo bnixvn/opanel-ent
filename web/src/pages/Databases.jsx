@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, download, fmtBytes } from '../api.js';
-import { Card, Empty, Message, Search, Secret, matches, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Hint, Message, Search, Secret, matches, useConfirm, useMessage } from '../components.jsx';
 
 export default function Databases({ me }) {
   const [databases, setDatabases] = useState([]);
@@ -29,6 +29,10 @@ export default function Databases({ me }) {
     api.get('/phpmyadmin').then((r) => setPma(r.phpmyadmin)).catch(() => {});
     if (staff) api.get('/users').then((r) => setOwners(r.users || [])).catch(() => {});
   }, [load, staff]);
+
+  // Which account's databases phpMyAdmin should open. Staff pick one; a
+  // customer only ever has their own.
+  const [pmaOwner, setPmaOwner] = useState('');
 
   // The link is single-use and short-lived, so it is fetched at the moment
   // the button is pressed rather than rendered into the page and left there.
@@ -65,53 +69,61 @@ export default function Databases({ me }) {
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
 
-      <Card title="phpMyAdmin">
+      <Card
+        title={(
+          <>
+            phpMyAdmin
+            <Hint>
+              Opens with a throwaway database account that can reach only the
+              chosen owner&apos;s databases and expires by itself. The panel
+              never stores your database password, so it cannot sign in as you.
+            </Hint>
+          </>
+        )}
+      >
         {!pma ? null : pma.installed ? (
-          <div className="row" style={{ alignItems: 'center' }}>
-            <div>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => openPhpMyAdmin('')}
-              >
-                Open phpMyAdmin
-              </button>
-            </div>
-            {staff && owners.filter((u) => u.linux_uid).length > 0 && (
-              <div className="field" style={{ flex: '0 0 12rem' }}>
-                <label htmlFor="pmaOwner">as</label>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            {staff && (
+              <div className="field" style={{ flex: '0 0 14rem' }}>
+                <label htmlFor="pmaOwner">Account</label>
                 <select
                   id="pmaOwner"
-                  onChange={(e) => e.target.value && openPhpMyAdmin(e.target.value)}
-                  defaultValue=""
+                  value={pmaOwner}
+                  onChange={(e) => setPmaOwner(e.target.value)}
                 >
-                  <option value="">pick an account…</option>
+                  <option value="">{me.username} (me)</option>
                   {owners.filter((u) => u.linux_uid).map((u) => (
                     <option key={u.id} value={u.username}>{u.username}</option>
                   ))}
                 </select>
               </div>
             )}
-            <p className="muted" style={{ flex: 1, fontSize: '.83rem', margin: 0 }}>
-              Opens with a throwaway database account that can reach only this
-              owner&apos;s databases and expires by itself. The panel never stores
-              your database password, so it cannot sign in as you.
-            </p>
+            <div>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => openPhpMyAdmin(pmaOwner)}
+              >
+                Open phpMyAdmin
+              </button>
+            </div>
           </div>
         ) : (
-          <>
-            <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
-              Not installed. It is served through the panel on the loopback
-              address, so it needs no hostname, no certificate and no open port.
+          <div className="row" style={{ alignItems: 'center' }}>
+            <div>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => guard(() => api.post('/phpmyadmin/install', {}), 'phpMyAdmin installed')
+                  .then(() => api.get('/phpmyadmin').then((r) => setPma(r.phpmyadmin)).catch(() => {}))}
+              >
+                Install phpMyAdmin
+              </button>
+            </div>
+            <p className="muted" style={{ flex: 1, margin: 0, fontSize: '.83rem' }}>
+              Not installed yet.
             </p>
-            <button
-              type="button"
-              onClick={() => guard(() => api.post('/phpmyadmin/install', {}), 'phpMyAdmin installed')
-                .then(() => api.get('/phpmyadmin').then((r) => setPma(r.phpmyadmin)).catch(() => {}))}
-            >
-              Install phpMyAdmin
-            </button>
-          </>
+          </div>
         )}
       </Card>
 
