@@ -49,6 +49,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerWPManage(r, deps)
 	registerClamAV(r)
 	registerCron(r)
+	registerDestinations(r)
 }
 
 // PingResult is the reply to "ping".

@@ -44,9 +44,11 @@ const AgentTimeout = actions.BackupBudget - time.Minute
 type Service struct {
 	db    *db.DB
 	agent *agentclient.Client
-	// slow is the same socket with a deadline long enough for an archive.
-	slow *agentclient.Client
-	log  *slog.Logger
+	// slow is the same socket with a deadline long enough for an archive,
+	// and offsite one longer still: an upload crosses the internet.
+	slow    *agentclient.Client
+	offsite *agentclient.Client
+	log     *slog.Logger
 
 	// running guards against two archives of one account at once: they would
 	// race over the same temporary directory and produce two half-consistent
@@ -62,7 +64,8 @@ func New(database *db.DB, ac *agentclient.Client, log *slog.Logger) *Service {
 	}
 	return &Service{
 		db: database, agent: ac, slow: ac.WithTimeout(AgentTimeout),
-		log: log, running: make(map[int64]bool),
+		offsite: ac.WithTimeout(actions.DestinationBudget),
+		log:     log, running: make(map[int64]bool),
 	}
 }
 
@@ -192,6 +195,58 @@ func (s *Service) run(row *db.Backup, req Request, dbs []string, sites []backupa
 	if ferr := s.db.FinishBackup(finishCtx, row.ID, res.SizeBytes, res.FileCount, res.SHA256, msg); ferr != nil {
 		s.log.Error("backups: cannot record outcome", "id", row.ID, "err", ferr)
 	}
+
+	// Only a finished archive is worth sending anywhere.
+	if err == nil {
+		s.copyOffsite(row.ID, req.Owner.ID, req.Owner.Username, row.Filename)
+	}
+}
+
+// copyOffsite sends a finished archive to every destination configured for
+// the account.
+//
+// After the backup is recorded, not before: a destination that is unreachable
+// must not make a perfectly good local archive look like a failure. Each
+// destination is recorded on its own, so "the backup ran but the offsite copy
+// did not" is a state the panel can show rather than a silence.
+func (s *Service) copyOffsite(backupID, ownerID int64, ownerName, filename string) {
+	ctx, cancel := context.WithTimeout(context.Background(), actions.DestinationBudget)
+	defer cancel()
+
+	dests, err := s.db.DestinationsFor(ctx, ownerID)
+	if err != nil || len(dests) == 0 {
+		return
+	}
+	local := actions.BackupPath(ownerName, filename)
+
+	for _, d := range dests {
+		res, err := agentclient.Call[actions.DestinationResult](ctx, s.offsite, "dest.upload", 1,
+			actions.DestinationUploadRequest{ID: d.ID, Path: local, Name: filename})
+		copyRow := &db.BackupCopy{
+			BackupID: backupID, DestinationID: d.ID,
+			RemotePath: res.Remote, Bytes: res.Bytes, Status: "uploaded",
+		}
+		if err != nil {
+			copyRow.Status, copyRow.Error = "failed", trimError(err.Error())
+			s.log.Error("backups: offsite copy failed",
+				"destination", d.Name, "file", filename, "err", err)
+			_ = s.db.SetDestinationResult(ctx, d.ID, false, copyRow.Error)
+		} else {
+			s.log.Info("backups: copied offsite",
+				"destination", d.Name, "remote", res.Remote, "bytes", res.Bytes)
+			_ = s.db.SetDestinationResult(ctx, d.ID, true, "")
+		}
+		if err := s.db.RecordBackupCopy(ctx, copyRow); err != nil {
+			s.log.Warn("backups: cannot record an offsite copy", "err", err)
+		}
+	}
+}
+
+func trimError(s string) string {
+	if len(s) > 400 {
+		return s[:400] + "…"
+	}
+	return s
 }
 
 // Restore unpacks an archive back over its account.

@@ -183,6 +183,11 @@ func (s *Server) routes() http.Handler {
 			// visitors' addresses and the paths they asked for.
 			pr.Get("/logs", s.handleLogTail)
 			pr.Get("/logs/download", s.handleLogDownload)
+			pr.Get("/backup-destinations", s.handleDestinationList)
+			pr.Post("/backup-destinations", s.handleDestinationCreate)
+			pr.Patch("/backup-destinations/{id}", s.handleDestinationUpdate)
+			pr.Post("/backup-destinations/{id}/test", s.handleDestinationTest)
+			pr.Delete("/backup-destinations/{id}", s.handleDestinationDelete)
 			pr.Get("/cron", s.handleCronList)
 			pr.Post("/cron", s.handleCronCreate)
 			pr.Patch("/cron/{id}", s.handleCronUpdate)

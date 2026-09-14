@@ -156,6 +156,13 @@ func backupPath(owner, name string) string {
 	return filepath.Join(BackupRoot, owner, name)
 }
 
+// BackupPath is where an account's archive lives. Exported so the panel can
+// name a file for an upload without rebuilding the layout and getting it
+// wrong -- which is exactly what happened the first time.
+func BackupPath(owner, name string) string {
+	return backupPath(owner, name)
+}
+
 func registerBackup(r *agent.Registry) {
 	agent.RegisterSlow(r, "backup.create", 1, BackupBudget, createBackup)
 	agent.RegisterSlow(r, "backup.restore", 1, BackupBudget, restoreBackup)

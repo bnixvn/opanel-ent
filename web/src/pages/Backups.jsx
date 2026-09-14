@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, download, fmtBytes, fmtDate } from '../api.js';
 import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
+import Destinations from './Destinations.jsx';
 
 export default function Backups({ me }) {
   const [owner, setOwner] = useState('');
@@ -68,6 +69,8 @@ export default function Backups({ me }) {
     <>
       {dialog}
       <Message value={msg.message} onClear={msg.clear} />
+
+      <Destinations me={me} />
 
       <Card>
         <div className="toolbar">
