@@ -22,6 +22,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/filemanager"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
@@ -84,7 +85,8 @@ func run(cfg *config.Config, log *slog.Logger) error {
 	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), planSvc, log)
 	dbSvc := databases.New(database, ac, planSvc, log)
 	userSvc := panelusers.New(database, ac, log)
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, log)
+	fileSvc := filemanager.New(database, ac, log)
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, planSvc, fileSvc, log)
 	api.StartBackgroundTasks(ctx)
 
 	srv := api.HTTPServer()

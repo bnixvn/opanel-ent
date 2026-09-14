@@ -83,6 +83,22 @@
   dl.kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem .9rem;margin:0;font-size:.88rem}
   dl.kv dt{color:var(--muted)}
   dl.kv dd{margin:0}
+
+  /* file manager */
+  .crumbs{display:flex;gap:.2rem;align-items:center;flex-wrap:wrap;font-size:.88rem}
+  .crumbs a{text-decoration:none}
+  .crumbs span.sep{color:var(--muted)}
+  .fname{background:none;border:0;color:inherit;font:inherit;padding:0;cursor:pointer;
+         text-align:left}
+  .fname:hover{text-decoration:underline}
+  .fname.dir{color:var(--accent);font-weight:500}
+  .ficon{display:inline-block;width:1.2rem;color:var(--muted)}
+  #editor textarea{width:100%;min-height:24rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+       font-size:.85rem;line-height:1.5;border:1px solid var(--line);border-radius:6px;
+       background:var(--bg);color:var(--ink);padding:.6rem;tab-size:4}
+  .dropzone{border:1px dashed var(--line);border-radius:var(--radius);padding:.9rem;
+       text-align:center;color:var(--muted);font-size:.85rem}
+  .dropzone.over{border-color:var(--accent);color:var(--ink)}
 </style>
 </head>
 <body>
@@ -105,6 +121,7 @@
     <nav>
       <button data-tab="sites" aria-current="page">Sites</button>
       <button data-tab="databases">Databases</button>
+      <button data-tab="files">Files</button>
       <button data-tab="php">PHP</button>
       <button data-tab="users" data-staff>Users</button>
       <button data-tab="plans" data-staff>Packages</button>
@@ -204,6 +221,73 @@
           <thead><tr><th>Version</th><th>Status</th><th>Interpreter</th><th></th></tr></thead>
           <tbody></tbody>
         </table></div>
+      </div>
+    </section>
+
+    <section data-panel="files" class="hidden">
+      <div class="card">
+        <div class="row" style="align-items:center">
+          <div class="field" id="fmOwnerWrap" style="flex:0 0 12rem">
+            <label for="fmOwner">Account</label>
+            <select id="fmOwner" style="width:100%"></select>
+          </div>
+          <div class="field" style="flex:3 1 20rem">
+            <label>Location</label>
+            <div class="crumbs" id="fmCrumbs"></div>
+          </div>
+          <div>
+            <button class="act" id="fmUp">Up</button>
+            <button class="act" id="fmRefresh">Refresh</button>
+            <button class="act" id="fmNewDir">New folder</button>
+            <button class="act" id="fmNewFile">New file</button>
+          </div>
+        </div>
+
+        <form id="fmMkdir" class="row hidden" style="margin-top:.7rem">
+          <div class="field" style="flex:0 1 18rem">
+            <label for="fmMkdirName">Name of the new folder</label>
+            <input id="fmMkdirName" style="width:100%" required></div>
+          <div><button class="act primary" type="submit">Create</button>
+               <button class="act" type="button" data-cancel="fmMkdir">Cancel</button></div>
+        </form>
+
+        <form id="fmTouch" class="row hidden" style="margin-top:.7rem">
+          <div class="field" style="flex:0 1 18rem">
+            <label for="fmTouchName">Name of the new file</label>
+            <input id="fmTouchName" style="width:100%" required></div>
+          <div><button class="act primary" type="submit">Create and edit</button>
+               <button class="act" type="button" data-cancel="fmTouch">Cancel</button></div>
+        </form>
+
+        <div id="fmMsg" style="margin-top:.7rem"></div>
+      </div>
+
+      <div class="card" id="fmBrowser">
+        <h2>Files</h2>
+        <div class="scroll"><table id="fmTable">
+          <thead><tr><th>Name</th><th>Size</th><th>Mode</th><th>Owner</th><th>Modified</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="empty hidden" id="fmEmpty">This folder is empty.</div>
+
+        <form id="fmUpload" style="margin-top:.9rem">
+          <div class="dropzone" id="fmDrop">
+            <input type="file" id="fmFile" multiple style="max-width:100%">
+            <button class="act" type="submit">Upload here</button>
+            <div style="margin-top:.4rem" id="fmUploadHint"></div>
+          </div>
+        </form>
+      </div>
+
+      <div class="card hidden" id="editor">
+        <h2>Editing <code id="edPath"></code></h2>
+        <div id="edMsg"></div>
+        <textarea id="edText" spellcheck="false"></textarea>
+        <p style="margin:.7rem 0 0">
+          <button class="act primary" id="edSave">Save</button>
+          <button class="act" id="edClose">Close</button>
+          <span class="muted" id="edInfo" style="margin-left:.6rem"></span>
+        </p>
       </div>
     </section>
 
@@ -381,6 +465,7 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
   $$("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   if (b.dataset.tab === "system") loadSystem();
   if (b.dataset.tab === "databases") loadDatabases();
+  if (b.dataset.tab === "files") openFiles();
   if (b.dataset.tab === "users") loadUsers();
   if (b.dataset.tab === "plans") loadPlans();
   if (b.dataset.tab === "account") loadAccount();
@@ -698,6 +783,318 @@ async function phpAction(btn, path, method, busy) {
   await loadPHP();
   await loadSites();
 }
+
+/* ---------- file manager ---------- */
+
+// The whole tab is one directory at a time: fmOwner is the Linux account
+// whose home is the root, fmPath is a path relative to it. Nothing outside
+// that home is reachable, and the agent enforces it with os.Root rather than
+// trusting anything sent from here.
+let fmOwner = "", fmPath = "", fmLimits = { max_upload_bytes: 0, max_edit_bytes: 0 };
+// The file the editor currently holds, "" when it is closed.
+let edPath = "";
+
+// A mutating call sends its path in the body, but the account still has to
+// travel: without it the panel resolves the request to whoever is signed in,
+// and an administrator has no home directory of their own to write into.
+const fmOwnerQ = () => (fmOwner ? "?owner=" + encodeURIComponent(fmOwner) : "");
+
+const fmQuery = (extra = {}) => {
+  const q = new URLSearchParams({ path: fmPath, ...extra });
+  if (fmOwner) q.set("owner", fmOwner);
+  return q.toString();
+};
+
+async function openFiles() {
+  if (!fmLimits.max_upload_bytes) {
+    try { fmLimits = await api("/files/limits"); } catch {}
+    $("#fmUploadHint").textContent =
+      `Up to ${fmBytes(fmLimits.max_upload_bytes)} per file. Larger files belong on SFTP.`;
+  }
+  const staff = me.role === "admin" || me.role === "reseller";
+  $("#fmOwnerWrap").classList.toggle("hidden", !staff);
+  if (staff && !$("#fmOwner").options.length) {
+    let list = [];
+    try { list = (await api("/users")).users.filter(u => u.linux_uid); } catch {}
+    $("#fmOwner").innerHTML = list.length
+      ? list.map(u => `<option value="${esc(u.username)}">${esc(u.username)}</option>`).join("")
+      : `<option value="">no hosting accounts yet</option>`;
+    fmOwner = $("#fmOwner").value;
+  }
+  await loadFiles();
+}
+
+const fmBytes = n => {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
+};
+
+function fmCrumbs() {
+  const parts = fmPath ? fmPath.split("/") : [];
+  const home = `<a href="#" data-go="">home</a>`;
+  const rest = parts.map((p, i) =>
+    `<span class="sep">/</span><a href="#" data-go="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`);
+  $("#fmCrumbs").innerHTML = home + rest.join("");
+  $$("#fmCrumbs a").forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    fmPath = a.dataset.go;
+    loadFiles();
+  }));
+}
+
+async function loadFiles() {
+  note("#fmMsg", "");
+  fmCrumbs();
+  let data;
+  try { data = await api("/files?" + fmQuery()); }
+  catch (err) {
+    note("#fmMsg", err.message);
+    $("#fmTable tbody").innerHTML = "";
+    return;
+  }
+
+  const tb = $("#fmTable tbody");
+  tb.innerHTML = "";
+  const entries = data.entries || [];
+  // Directories first, then files: the ordering people expect when clicking
+  // their way down a tree.
+  entries.sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name));
+  $("#fmEmpty").classList.toggle("hidden", entries.length > 0);
+  $("#fmTable").classList.toggle("hidden", entries.length === 0);
+
+  for (const e of entries) {
+    const full = fmPath ? `${fmPath}/${e.name}` : e.name;
+    const icon = e.is_link ? "\u2192" : e.is_dir ? "\u{1F4C1}" : "\u{1F4C4}";
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><span class="ficon">${icon}</span>` +
+        `<button class="fname${e.is_dir ? " dir" : ""}" data-open="${esc(full)}" ` +
+        `data-dir="${e.is_dir ? 1 : 0}">${esc(e.name)}</button></td>` +
+      `<td class="muted">${e.is_dir ? "\u2014" : fmBytes(e.size)}</td>` +
+      `<td><input value="${esc(e.mode)}" data-mode="${esc(full)}" size="4" style="width:4.2rem"></td>` +
+      `<td class="muted">${esc(e.owner || "")}</td>` +
+      `<td class="muted">${new Date(e.mod_time).toLocaleString()}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        (e.is_dir ? "" : `<a href="#" data-dl="${esc(full)}">Download</a> `) +
+        `<a href="#" data-ren="${esc(full)}" data-name="${esc(e.name)}">Rename</a> ` +
+        `<a href="#" data-rm="${esc(full)}" data-dir="${e.is_dir ? 1 : 0}">Delete</a></td>`;
+    tb.appendChild(tr);
+  }
+
+  $$("[data-open]", tb).forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.dir === "1") { fmPath = b.dataset.open; loadFiles(); }
+    else editFile(b.dataset.open);
+  }));
+
+  $$("[data-mode]", tb).forEach(i => i.addEventListener("change", () =>
+    fmGuard(() => api("/files/chmod" + fmOwnerQ(), {
+      method: "POST",
+      body: JSON.stringify({ path: i.dataset.mode, mode: i.value.trim() }),
+    }), `Permissions set to ${i.value.trim()}`)));
+
+  $$("[data-dl]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    // A plain navigation, so the browser's own download machinery handles it
+    // and a large file never passes through JavaScript memory.
+    window.location = "/api/files/download?" + fmQuery({ path: a.dataset.dl });
+  }));
+
+  $$("[data-ren]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    renameRow(a.closest("tr"), a.dataset.ren, a.dataset.name);
+  }));
+
+  $$("[data-rm]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    const what = a.dataset.dir === "1"
+      ? `Delete the folder ${a.dataset.rm} and everything inside it?`
+      : `Delete ${a.dataset.rm}?`;
+    if (!confirm(what + "\n\nThis cannot be undone from the panel.")) return;
+    fmForget(a.dataset.rm);
+    fmGuard(() => api("/files?" + fmQuery({ path: a.dataset.rm }), { method: "DELETE" }),
+      "Deleted");
+  }));
+}
+
+// renameRow turns the name cell into an input rather than opening a dialog:
+// a rename is usually a small edit to the existing name, which a prompt box
+// makes needlessly awkward.
+function renameRow(tr, full, name) {
+  const cell = tr.firstElementChild;
+  const dir = full.includes("/") ? full.slice(0, full.lastIndexOf("/") + 1) : "";
+  cell.innerHTML = `<input value="${esc(name)}" style="width:14rem"> ` +
+    `<button class="act" data-ok>Rename</button> <button class="act" data-no>Cancel</button>`;
+  const input = $("input", cell);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const to = input.value.trim();
+    if (!to || to === name) return loadFiles();
+    fmForget(full);
+    fmGuard(() => api("/files/rename" + fmOwnerQ(), {
+      method: "POST",
+      body: JSON.stringify({ from: full, to: dir + to }),
+    }), `Renamed to ${to}`);
+  };
+  $("[data-ok]", cell).addEventListener("click", commit);
+  $("[data-no]", cell).addEventListener("click", () => loadFiles());
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    if (e.key === "Escape") loadFiles();
+  });
+}
+
+// fmForget closes the editor when the file it holds is about to move or be
+// removed. Leaving it open would let a later Save write the old path back,
+// quietly resurrecting a file the customer just renamed away.
+function fmForget(p) {
+  if (edPath === p || edPath.startsWith(p + "/")) {
+    $("#editor").classList.add("hidden");
+    edPath = "";
+  }
+}
+
+async function fmGuard(fn, okMsg) {
+  note("#fmMsg", "");
+  try { await fn(); note("#fmMsg", okMsg, "ok"); }
+  catch (err) { note("#fmMsg", err.message); }
+  await loadFiles();
+}
+
+$("#fmOwner").addEventListener("change", () => {
+  fmOwner = $("#fmOwner").value;
+  fmPath = "";
+  $("#editor").classList.add("hidden");
+  loadFiles();
+});
+
+$("#fmRefresh").addEventListener("click", () => loadFiles());
+
+$("#fmUp").addEventListener("click", () => {
+  if (!fmPath) return;
+  fmPath = fmPath.includes("/") ? fmPath.slice(0, fmPath.lastIndexOf("/")) : "";
+  loadFiles();
+});
+
+$$("[data-cancel]").forEach(b => b.addEventListener("click", () =>
+  $("#" + b.dataset.cancel).classList.add("hidden")));
+
+$("#fmNewDir").addEventListener("click", () => {
+  $("#fmMkdir").classList.remove("hidden");
+  $("#fmMkdirName").focus();
+});
+
+$("#fmNewFile").addEventListener("click", () => {
+  $("#fmTouch").classList.remove("hidden");
+  $("#fmTouchName").focus();
+});
+
+$("#fmMkdir").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#fmMkdirName").value.trim();
+  $("#fmMkdirName").value = "";
+  $("#fmMkdir").classList.add("hidden");
+  await fmGuard(() => api("/files/directory" + fmOwnerQ(), {
+    method: "POST",
+    body: JSON.stringify({ path: fmPath ? `${fmPath}/${name}` : name }),
+  }), `Created ${name}`);
+});
+
+$("#fmTouch").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#fmTouchName").value.trim();
+  $("#fmTouchName").value = "";
+  $("#fmTouch").classList.add("hidden");
+  const full = fmPath ? `${fmPath}/${name}` : name;
+  await fmGuard(() => api("/files/content" + fmOwnerQ(), {
+    method: "PUT", body: JSON.stringify({ path: full, content: "" }),
+  }), `Created ${name}`);
+  editFile(full);
+});
+
+/* ---------- upload ---------- */
+
+const fmDrop = $("#fmDrop");
+["dragenter", "dragover"].forEach(ev => fmDrop.addEventListener(ev, e => {
+  e.preventDefault();
+  fmDrop.classList.add("over");
+}));
+["dragleave", "drop"].forEach(ev => fmDrop.addEventListener(ev, e => {
+  e.preventDefault();
+  fmDrop.classList.remove("over");
+}));
+fmDrop.addEventListener("drop", e => uploadFiles(e.dataTransfer.files));
+
+$("#fmUpload").addEventListener("submit", e => {
+  e.preventDefault();
+  uploadFiles($("#fmFile").files);
+});
+
+async function uploadFiles(list) {
+  const files = [...(list || [])];
+  if (!files.length) { note("#fmMsg", "Choose a file first"); return; }
+  const big = files.find(f => f.size > fmLimits.max_upload_bytes);
+  if (big) {
+    note("#fmMsg", `${big.name} is ${fmBytes(big.size)}, over the ` +
+      `${fmBytes(fmLimits.max_upload_bytes)} limit. Send it over SFTP instead.`);
+    return;
+  }
+  const body = new FormData();
+  for (const f of files) body.append("file", f, f.name);
+
+  note("#fmMsg", `Uploading ${files.length} file(s)\u2026`, "ok");
+  try {
+    // No Content-Type header: the browser has to set the multipart boundary,
+    // and the shared api() helper would override it with application/json.
+    const res = await fetch("/api/files/upload?" + fmQuery(), { method: "POST", body });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || res.statusText);
+    note("#fmMsg", `Uploaded ${out.uploaded.length} file(s)`, "ok");
+    $("#fmFile").value = "";
+  } catch (err) { note("#fmMsg", err.message); }
+  await loadFiles();
+}
+
+/* ---------- editor ---------- */
+
+async function editFile(p) {
+  note("#fmMsg", "");
+  let res;
+  try { res = await api("/files/content?" + fmQuery({ path: p })); }
+  catch (err) { note("#fmMsg", err.message); return; }
+
+  if (res.truncated) {
+    note("#fmMsg", `${p} is ${fmBytes(res.size)}, larger than the ` +
+      `${fmBytes(fmLimits.max_edit_bytes)} the editor can hold. ` +
+      `Download it instead \u2014 saving here would lose the rest of the file.`);
+    return;
+  }
+  edPath = p;
+  $("#edPath").textContent = p;
+  $("#edText").value = res.content;
+  $("#edInfo").textContent = `${fmBytes(res.size)} on disk`;
+  note("#edMsg", "");
+  $("#editor").classList.remove("hidden");
+  $("#editor").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#edSave").addEventListener("click", async () => {
+  note("#edMsg", "");
+  try {
+    await api("/files/content" + fmOwnerQ(), {
+      method: "PUT",
+      body: JSON.stringify({ path: edPath, content: $("#edText").value }),
+    });
+    note("#edMsg", `Saved ${edPath}`, "ok");
+    $("#edInfo").textContent = `${fmBytes(new Blob([$("#edText").value]).size)} on disk`;
+    await loadFiles();
+  } catch (err) { note("#edMsg", err.message); }
+});
+
+$("#edClose").addEventListener("click", () => $("#editor").classList.add("hidden"));
 
 /* ---------- packages ---------- */
 

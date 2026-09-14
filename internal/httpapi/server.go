@@ -14,6 +14,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/filemanager"
 	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/plans"
 	"github.com/bnixvn/opanel-ent/internal/sites"
@@ -29,6 +30,7 @@ type Server struct {
 	databases *databases.Service
 	users     *panelusers.Service
 	plans     *plans.Service
+	files     *filemanager.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -36,7 +38,7 @@ type Server struct {
 }
 
 // New builds the API server and its route table.
-func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service,
+func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service, planSvc *plans.Service, fileSvc *filemanager.Service,
 	log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
@@ -50,6 +52,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		databases: dbSvc,
 		users:     userSvc,
 		plans:     planSvc,
+		files:     fileSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -113,6 +116,19 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/usage", s.handleUsage)
 			pr.Get("/users/{id}/usage", s.handleUsage)
 			pr.Get("/plans", s.handlePlanList)
+
+			// Files. The service resolves whose home is in play, so an end
+			// user reaches the same routes and can only ever see their own.
+			pr.Get("/files", s.handleFileList)
+			pr.Get("/files/limits", s.handleFileLimits)
+			pr.Get("/files/content", s.handleFileRead)
+			pr.Put("/files/content", s.handleFileWrite)
+			pr.Post("/files/directory", s.handleFileMkdir)
+			pr.Post("/files/rename", s.handleFileRename)
+			pr.Post("/files/chmod", s.handleFileChmod)
+			pr.Post("/files/upload", s.handleFileUpload)
+			pr.Get("/files/download", s.handleFileDownload)
+			pr.Delete("/files", s.handleFileDelete)
 
 			pr.Get("/php/versions", s.handlePHPList)
 			pr.Get("/webserver/status", s.handleWebserverStatus)

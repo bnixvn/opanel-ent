@@ -357,11 +357,21 @@ Lợi ích: bỏ certbot, bỏ EPEL dependency, bỏ deploy-hook shell, bỏ c�
 - phpMyAdmin: EL không có package → vendor tarball vào `/usr/share/phpmyadmin`, checksum verify, tự sinh `config.inc.php`. SSO giữ cơ chế token 60s của v1
 - **Ghi chú Stage B:** nếu sau này bật MySQL Governor thì phải thay MariaDB bằng bản CloudLinux build qua `mysqlgovernor.py`. Đây là migration có downtime — thiết kế lớp `mariadb` để không giả định nguồn package
 
-### 4.7 File manager
+### 4.7 File manager — đã làm (S5)
 
 Dùng `os.Root` (Go 1.24+) — mở một root handle theo home của user rồi mọi thao tác đi qua handle đó. Kernel đảm bảo không thoát ra ngoài, kể cả qua symlink hay `..`. Thay thế toàn bộ lớp kiểm tra path thủ công của v1 bằng bảo đảm ở tầng syscall.
 
-Thêm: upload/download stream, nén/giải nén in-process, thao tác đệ quy có worker pool.
+Đã kiểm chứng trên host thật: symlink trỏ ra `/etc` và `/etc/shadow` đều bị từ chối ở cả đọc lẫn ghi (`path escapes from parent`), tên file upload dạng `../../../tmp/x` bị rút về basename.
+
+Hiện trạng:
+
+- Agent: `fs.list`, `fs.read`, `fs.write`, `fs.mkdir`, `fs.delete`, `fs.rename`, `fs.chmod`, `fs.install`, `fs.stage`
+- API: `/api/files*`, quyền do `filemanager.ResolveOwner` quyết — end user chỉ với tới home của chính mình, staff phải nêu `?owner=`
+- Upload/download đi qua file staging ở `/var/lib/opanel/uploads`: agent chạy root nên đọc/ghi được nhà khách, API chạy `opanel` thì không. Upload stream thẳng từ multipart (không `ParseMultipartForm`), trần 256 MB/file; editor trần 1 MB
+- chmod chỉ nhận 12 bit permission — setuid/setgid/sticky bị từ chối ở tầng validate
+- UI: tab Files với breadcrumb, editor, kéo-thả upload, đổi tên tại chỗ
+
+Còn thiếu: nén/giải nén in-process, thao tác đệ quy có worker pool, sao chép/di chuyển giữa các thư mục.
 
 ### 4.8 Backup
 
@@ -474,19 +484,23 @@ backup**; nhà cung cấp cần **quota và WHMCS** để thu tiền. Terminal, 
 manager, quét mã độc, dashboard tài nguyên là thứ bán được mà chưa cần có ngay
 từ ngày đầu.
 
-| # | Việc | Vì sao ở vị trí này |
-|---|---|---|
-| **S1** | Database MariaDB + user + phpMyAdmin SSO | WordPress không chạy được nếu thiếu. Chặn mọi thứ phía sau |
-| **S2** | SSL cho từng site + auto-renew | Không có HTTPS thì không bán được năm 2026. Cũng sửa luôn việc Chrome HTTPS-First báo lỗi với site mới |
-| **S3** | WordPress one-click + WP-CLI | Phần lớn khách mua hosting là để chạy WordPress |
-| **S4** | Backup + restore + lịch | Khách không giao dữ liệu cho nhà cung cấp không có backup |
-| **S5** | Quota dung lượng + giới hạn số site + hosting plan | Không có thì không ép được gói |
-| **S6** | API token endpoint + provisioning + module WHMCS | Để thu tiền tự động |
-| **S7** | Endpoint bật 2FA, quản lý API token, firewall API | Lấp ba thứ đang làm dở |
-| **S8** | WAF, quét mã độc, cron, dashboard tài nguyên, update OS | Vận hành, làm sau khi đã có doanh thu |
-| **S9** | File manager, terminal | Tiện ích |
-| **S10** | Import DirectAdmin | Kéo khách từ host khác — quan trọng nhưng phức tạp nhất |
-| **S11** | Stage B: CloudLinux + LSWS Enterprise + LVE | Như plan cũ |
+Bảng dưới là thứ tự **thực thi**, cập nhật theo những gì đã làm xong. Thứ tự
+đã lệch khỏi bản đầu tiên vì yêu cầu bổ sung: quản lý user và package phải có
+trước WordPress installer, còn file manager được kéo lên trước backup.
+
+| # | Việc | Trạng thái | Vì sao ở vị trí này |
+|---|---|---|---|
+| **S1** | Database MariaDB + user + phân quyền | ✅ xong | WordPress không chạy được nếu thiếu. Chặn mọi thứ phía sau |
+| **S2** | Quản lý user panel + 2FA endpoint | ✅ xong | Không tạo được khách hàng thì không có gì để bán |
+| **S3** | Package: giới hạn site, database, dung lượng | ✅ xong | Không có thì không ép được gói |
+| **S4** | SSL cho từng site + auto-renew | ✅ xong | Không có HTTPS thì không bán được năm 2026 |
+| **S5** | File manager | ✅ xong | Khách cần sửa file mà không phải mở SFTP client |
+| **S6** | Backup + restore + lịch + SFTP target | tiếp theo | Khách không giao dữ liệu cho nhà cung cấp không có backup |
+| **S7** | WordPress one-click + WP-CLI, editor PHP ini, tuner PHP/MariaDB, phpMyAdmin SSO | | Phần lớn khách mua hosting là để chạy WordPress |
+| **S8** | Firewall API/UI, WAF, quét mã độc | | Lấp phần đang làm dở, rồi tới bảo mật |
+| **S9** | Cron, dashboard tài nguyên, terminal, update OS | | Vận hành, làm sau khi đã có doanh thu |
+| **S10** | API token endpoint + provisioning + module WHMCS + import DirectAdmin | | Thu tiền tự động và kéo khách từ host khác |
+| **S11** | Stage B: CloudLinux + LSWS Enterprise + LVE | | Như plan cũ |
 
 Các mục Phase 3–6 bên dưới giữ nguyên để tham chiếu nội dung; thứ tự thực thi
 theo bảng trên.
