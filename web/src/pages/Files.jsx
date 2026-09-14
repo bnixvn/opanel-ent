@@ -1,6 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api, download, fmtBytes, fmtDate } from '../api.js';
 import { Card, Empty, Message, useConfirm, useMessage } from '../components.jsx';
+
+// The editor is most of the interface's JavaScript, and it is only needed by
+// somebody who has opened a file. Loading it separately keeps the login page
+// and every other page small.
+const CodeEditor = lazy(() => import('../CodeEditor.jsx'));
+
+// Names an archive is likely to hide behind. Used only to decide whether to
+// offer "Extract"; the agent checks the format again before opening anything.
+const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz)$/i;
 
 export default function Files({ me }) {
   const [owner, setOwner] = useState('');
@@ -10,8 +19,13 @@ export default function Files({ me }) {
   const [home, setHome] = useState('');
   const [limits, setLimits] = useState({ max_upload_bytes: 0, max_edit_bytes: 0 });
   const [editing, setEditing] = useState(null);
+  const [dirty, setDirty] = useState(false);
   const [renaming, setRenaming] = useState(null);
   const [creating, setCreating] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const [clipboard, setClipboard] = useState(null);
+  const [archiving, setArchiving] = useState(null);
+  const [busy, setBusy] = useState(false);
   const fileInput = useRef(null);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
@@ -28,6 +42,9 @@ export default function Files({ me }) {
       setEntries(res.entries || []);
       setPath(res.path || '');
       setHome(res.home || '');
+      // A selection is a set of paths in the folder that was on screen, so
+      // it means nothing once the listing changes.
+      setSelected([]);
       msg.clear();
     } catch (err) {
       msg.fail(err);
@@ -53,12 +70,14 @@ export default function Files({ me }) {
 
   async function guard(fn, okText) {
     msg.clear();
+    setBusy(true);
     try {
       await fn();
       msg.ok(okText);
     } catch (err) {
       msg.fail(err);
     }
+    setBusy(false);
     await load();
   }
 
@@ -68,8 +87,23 @@ export default function Files({ me }) {
     (a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name),
   );
   const crumbs = path ? path.split('/') : [];
+  const fullPath = (name) => (path ? `${path}/${name}` : name);
+  const allSelected = sorted.length > 0 && selected.length === sorted.length;
+
+  function toggle(name) {
+    setSelected((s) => (s.includes(name) ? s.filter((n) => n !== name) : [...s, name]));
+  }
 
   async function openEditor(full) {
+    if (dirty) {
+      const ok = await ask({
+        title: 'Discard unsaved changes?',
+        body: `${editing.path} has changes you have not saved.`,
+        confirmLabel: 'Discard them',
+        danger: true,
+      });
+      if (!ok) return;
+    }
     try {
       const res = await api.get(`/files/content?${q(`path=${encodeURIComponent(full)}`)}`);
       if (res.truncated) {
@@ -81,9 +115,81 @@ export default function Files({ me }) {
         return;
       }
       setEditing({ path: full, content: res.content, size: res.size });
+      setDirty(false);
     } catch (err) {
       msg.fail(err);
     }
+  }
+
+  async function saveEditor() {
+    if (!editing) return;
+    try {
+      await api.put(`/files/content?${ownerQ}`, {
+        path: editing.path, content: editing.content,
+      });
+      msg.ok(`Saved ${editing.path}`);
+      setDirty(false);
+      await load();
+    } catch (err) {
+      msg.fail(err);
+    }
+  }
+
+  // Paste is a loop rather than one call: each item can fail on its own
+  // (a name already taken, say) and the rest should still land.
+  async function paste() {
+    if (!clipboard || !clipboard.items.length) return;
+    msg.clear();
+    setBusy(true);
+    const failed = [];
+    for (const item of clipboard.items) {
+      const name = item.slice(item.lastIndexOf('/') + 1);
+      const to = path ? `${path}/${name}` : name;
+      if (to === item) { failed.push(`${name} (already here)`); continue; }
+      try {
+        if (clipboard.mode === 'copy') {
+          await api.post(`/files/copy?${ownerQ}`, { from: item, to });
+        } else {
+          await api.post(`/files/rename?${ownerQ}`, { from: item, to });
+        }
+      } catch (err) {
+        failed.push(`${name} (${err.message})`);
+      }
+    }
+    setBusy(false);
+    if (failed.length) {
+      msg.fail(new Error(`Could not ${clipboard.mode}: ${failed.join('; ')}`));
+    } else {
+      msg.ok(`${clipboard.mode === 'copy' ? 'Copied' : 'Moved'} ${clipboard.items.length} item(s)`);
+    }
+    if (clipboard.mode === 'move') setClipboard(null);
+    await load();
+  }
+
+  async function deleteSelected() {
+    const ok = await ask({
+      title: `Delete ${selected.length} item(s)?`,
+      body: 'Any folder in the selection goes with everything inside it. '
+        + 'This cannot be undone from the panel.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    msg.clear();
+    setBusy(true);
+    const failed = [];
+    for (const name of selected) {
+      try {
+        await api.del(`/files?${q(`path=${encodeURIComponent(fullPath(name))}`)}`);
+      } catch (err) {
+        failed.push(`${name} (${err.message})`);
+      }
+    }
+    setBusy(false);
+    if (failed.length) msg.fail(new Error(`Could not delete: ${failed.join('; ')}`));
+    else msg.ok(`Deleted ${selected.length} item(s)`);
+    if (editing && selected.some((n) => editing.path.startsWith(fullPath(n)))) setEditing(null);
+    await load();
   }
 
   async function upload(files) {
@@ -123,7 +229,12 @@ export default function Files({ me }) {
               <select
                 id="fmOwner"
                 value={owner}
-                onChange={(e) => { setOwner(e.target.value); setEditing(null); load('', e.target.value); }}
+                onChange={(e) => {
+                  setOwner(e.target.value);
+                  setEditing(null);
+                  setClipboard(null);
+                  load('', e.target.value);
+                }}
               >
                 {owners.length === 0 && <option value="">no hosting accounts yet</option>}
                 {owners.map((u) => <option key={u.id}>{u.username}</option>)}
@@ -203,6 +314,83 @@ export default function Files({ me }) {
             </div>
           </form>
         )}
+
+        {/* The selection bar. Present only when something is selected, so it
+            never competes with the navigation above it. */}
+        {(selected.length > 0 || clipboard) && (
+          <div className="selbar">
+            {selected.length > 0 && (
+              <>
+                <strong>{selected.length} selected</strong>
+                <button type="button" disabled={busy} onClick={() => setClipboard({ mode: 'copy', items: selected.map(fullPath) })}>
+                  Copy
+                </button>
+                <button type="button" disabled={busy} onClick={() => setClipboard({ mode: 'move', items: selected.map(fullPath) })}>
+                  Cut
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setArchiving({
+                    name: (selected.length === 1 ? selected[0] : 'archive') + '.zip',
+                  })}
+                >
+                  Compress
+                </button>
+                <button type="button" disabled={busy} className="danger" onClick={deleteSelected}>
+                  Delete
+                </button>
+                <button type="button" className="link" onClick={() => setSelected([])}>Clear</button>
+              </>
+            )}
+            {clipboard && (
+              <span style={{ marginLeft: 'auto' }} className="nowrap">
+                <span className="muted">
+                  {clipboard.items.length} item(s) ready to {clipboard.mode === 'copy' ? 'copy' : 'move'}
+                </span>{' '}
+                <button type="button" className="primary" disabled={busy} onClick={paste}>
+                  Paste here
+                </button>{' '}
+                <button type="button" className="link" onClick={() => setClipboard(null)}>Cancel</button>
+              </span>
+            )}
+          </div>
+        )}
+
+        {archiving && (
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const dest = fullPath(archiving.name.trim());
+              const paths = selected.map(fullPath);
+              setArchiving(null);
+              guard(
+                () => api.post(`/files/archive?${ownerQ}`, { paths, dest }),
+                `Created ${archiving.name.trim()}`,
+              );
+            }}
+          >
+            <div className="field" style={{ flex: '0 1 20rem' }}>
+              <label htmlFor="arcName">Archive name</label>
+              <input
+                id="arcName"
+                autoFocus
+                required
+                value={archiving.name}
+                onChange={(e) => setArchiving({ name: e.target.value })}
+              />
+              <div className="muted" style={{ fontSize: '.78rem' }}>
+                The extension picks the format: <code>.zip</code>,{' '}
+                <code>.tar.gz</code> or <code>.tar</code>.
+              </div>
+            </div>
+            <div>
+              <button type="submit" className="primary">Compress</button>{' '}
+              <button type="button" onClick={() => setArchiving(null)}>Cancel</button>
+            </div>
+          </form>
+        )}
       </Card>
 
       <Card title="Files">
@@ -213,15 +401,31 @@ export default function Files({ me }) {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: '1.6rem' }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select everything in this folder"
+                      checked={allSelected}
+                      onChange={() => setSelected(allSelected ? [] : sorted.map((e) => e.name))}
+                    />
+                  </th>
                   <th>Name</th><th>Size</th><th>Mode</th><th>Owner</th><th>Modified</th><th />
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((e) => {
-                  const full = path ? `${path}/${e.name}` : e.name;
+                  const full = fullPath(e.name);
                   const isRenaming = renaming === full;
                   return (
-                    <tr key={e.name}>
+                    <tr key={e.name} className={selected.includes(e.name) ? 'selected' : undefined}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${e.name}`}
+                          checked={selected.includes(e.name)}
+                          onChange={() => toggle(e.name)}
+                        />
+                      </td>
                       <td>
                         {isRenaming ? (
                           <RenameInput
@@ -255,10 +459,10 @@ export default function Files({ me }) {
                         )}
                       </td>
                       <td className="muted">{e.is_dir ? '—' : fmtBytes(e.size)}</td>
-                      <td>
+                      <td className="nowrap">
                         <input
                           defaultValue={e.mode}
-                          style={{ width: '4.5rem' }}
+                          style={{ width: '4.5rem', display: 'inline-block' }}
                           onBlur={(ev) => {
                             if (ev.target.value.trim() === e.mode) return;
                             guard(
@@ -269,10 +473,52 @@ export default function Files({ me }) {
                             );
                           }}
                         />
+                        {e.is_dir && (
+                          <ChmodRecursive
+                            onApply={(mode) => guard(
+                              () => api.post(`/files/chmod-recursive?${ownerQ}`, { path: full, mode }),
+                              `${e.name} and everything in it set to ${mode}`,
+                            )}
+                            ask={ask}
+                            name={e.name}
+                          />
+                        )}
                       </td>
                       <td className="muted">{e.owner}</td>
                       <td className="muted">{fmtDate(e.mod_time)}</td>
                       <td className="right nowrap">
+                        {!e.is_dir && ARCHIVE_RE.test(e.name) && (
+                          <>
+                            <button
+                              type="button"
+                              className="link"
+                              disabled={busy}
+                              onClick={async () => {
+                                const ok = await ask({
+                                  title: `Extract ${e.name} here?`,
+                                  body: 'Files already in this folder with the same names '
+                                    + 'are replaced. Entries that point outside the folder '
+                                    + 'are refused rather than written.',
+                                  confirmLabel: 'Extract',
+                                });
+                                if (!ok) return;
+                                setBusy(true);
+                                try {
+                                  const res = await api.post(`/files/extract?${ownerQ}`, {
+                                    path: full, dest: path,
+                                  });
+                                  msg.ok(`Extracted ${res.entries} item(s), ${fmtBytes(res.bytes)}`);
+                                } catch (err) {
+                                  msg.fail(err);
+                                }
+                                setBusy(false);
+                                await load();
+                              }}
+                            >
+                              Extract
+                            </button>{' '}
+                          </>
+                        )}
                         {!e.is_dir && (
                           <>
                             <button
@@ -330,44 +576,105 @@ export default function Files({ me }) {
             <input type="file" multiple ref={fileInput} style={{ width: 'auto' }} />{' '}
             <button type="submit">Upload here</button>
             <div className="muted" style={{ marginTop: '.4rem', fontSize: '.85rem' }}>
-              Up to {fmtBytes(limits.max_upload_bytes)} per file. Larger files belong on SFTP.
+              Up to {fmtBytes(limits.max_upload_bytes)} per file, or drop them on this box.
+              Larger files belong on SFTP.
             </div>
           </div>
         </form>
       </Card>
 
       {editing && (
-        <Card title={<>Editing <code>{editing.path}</code></>}>
-          <textarea
-            style={{ minHeight: '24rem', fontFamily: 'ui-monospace, monospace', fontSize: '.85rem' }}
-            value={editing.content}
-            spellCheck={false}
-            onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-          />
-          <p style={{ marginBottom: 0 }}>
-            <button
-              type="button"
-              className="primary"
-              onClick={async () => {
-                try {
-                  await api.put(`/files/content?${ownerQ}`, {
-                    path: editing.path, content: editing.content,
-                  });
-                  msg.ok(`Saved ${editing.path}`);
-                  await load();
-                } catch (err) {
-                  msg.fail(err);
-                }
+        <Card
+          title={<>Editing <code>{editing.path}</code>{dirty ? ' •' : ''}</>}
+          actions={(
+            <>
+              <button type="button" className="primary" onClick={saveEditor} disabled={!dirty}>
+                Save
+              </button>{' '}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (dirty) {
+                    const ok = await ask({
+                      title: 'Close without saving?',
+                      body: `${editing.path} has changes you have not saved.`,
+                      confirmLabel: 'Discard them',
+                      danger: true,
+                    });
+                    if (!ok) return;
+                  }
+                  setEditing(null);
+                  setDirty(false);
+                }}
+              >
+                Close
+              </button>
+            </>
+          )}
+        >
+          <Suspense fallback={<p className="muted">Loading the editor…</p>}>
+            <CodeEditor
+              value={editing.content}
+              filename={editing.path}
+              onChange={(text) => {
+                editing.content = text; // eslint-disable-line no-param-reassign
+                if (!dirty) setDirty(true);
               }}
-            >
-              Save
-            </button>{' '}
-            <button type="button" onClick={() => setEditing(null)}>Close</button>{' '}
-            <span className="muted">{fmtBytes(editing.size)} on disk</span>
+              onSave={saveEditor}
+            />
+          </Suspense>
+          <p className="muted" style={{ margin: '.5rem 0 0', fontSize: '.8rem' }}>
+            {fmtBytes(editing.size)} on disk. Ctrl-S saves, Ctrl-F searches,
+            Tab indents.
           </p>
         </Card>
       )}
     </>
+  );
+}
+
+// ChmodRecursive is deliberately two clicks and a confirmation.
+//
+// Getting it wrong on a home directory is one of the few things in the file
+// manager a customer cannot undo themselves: a tree with no execute bit on
+// its directories cannot be listed, so it cannot be repaired through this
+// page either.
+function ChmodRecursive({ name, onApply, ask }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState('0755');
+
+  if (!open) {
+    return (
+      <>
+        {' '}
+        <button type="button" className="link" title="Apply a mode to everything inside" onClick={() => setOpen(true)}>
+          ⇊
+        </button>
+      </>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', gap: '.3rem', marginLeft: '.3rem' }}>
+      <input value={mode} style={{ width: '4.5rem' }} onChange={(e) => setMode(e.target.value)} />
+      <button
+        type="button"
+        onClick={async () => {
+          const ok = await ask({
+            title: `Apply ${mode} to everything in ${name}?`,
+            body: 'Every file inside gets this mode, and every folder gets it '
+              + 'plus the execute bit it needs to be opened at all. There is no '
+              + 'undo, and the panel does not record what the modes were.',
+            confirmLabel: 'Apply',
+            danger: true,
+          });
+          setOpen(false);
+          if (ok) onApply(mode.trim());
+        }}
+      >
+        Apply to all
+      </button>
+      <button type="button" className="link" onClick={() => setOpen(false)}>×</button>
+    </span>
   );
 }
 

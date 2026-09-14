@@ -73,7 +73,15 @@ func (s *Server) fileError(w http.ResponseWriter, op string, err error) {
 	case strings.Contains(msg, "not a directory"), strings.Contains(msg, "is a directory"),
 		strings.Contains(msg, "escapes from parent"), strings.Contains(msg, "path escapes"),
 		strings.Contains(msg, "invalid argument"), strings.Contains(msg, "may not contain"),
-		strings.Contains(msg, "is larger than"), strings.Contains(msg, "required"):
+		strings.Contains(msg, "is larger than"), strings.Contains(msg, "required"),
+		// An archive that fails these checks is the customer's file, not a
+		// fault in the panel, and reporting it as a 500 sends somebody
+		// looking through the panel's logs for a problem that is in the zip.
+		strings.Contains(msg, "already exists"),
+		strings.Contains(msg, "the archive"),
+		strings.Contains(msg, "is not a readable zip"),
+		strings.Contains(msg, "is not gzip"),
+		strings.Contains(msg, "is not a .zip"):
 		writeError(w, http.StatusBadRequest, "bad_request", msg)
 	default:
 		s.log.Error("httpapi: file operation failed", "op", op, "err", err)

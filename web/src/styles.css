@@ -235,6 +235,30 @@ dl.kv dd { margin: 0; }
 .check { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; }
 .check input { width: auto; margin: 0; }
 
+/* The file manager's selection bar, shown only when something is selected. */
+.selbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-top: 0.7rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}
+tr.selected > td { background: var(--ok-bg); }
+td input[type="checkbox"], th input[type="checkbox"] { width: auto; margin: 0; }
+
+/* CodeMirror fills the card and scrolls inside itself, so a long file does
+   not push the save button off the bottom of the page. */
+.editor { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.editor .cm-editor { height: 28rem; font-size: 0.83rem; }
+.editor .cm-editor.cm-focused { outline: none; }
+.editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.editor .cm-gutters { background: var(--bg); border-right: 1px solid var(--line); }
+
 @media (max-width: 60rem) {
   .shell { flex-direction: column; }
   .sidebar {

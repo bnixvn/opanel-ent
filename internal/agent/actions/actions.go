@@ -42,6 +42,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerDBExport(r)
 	registerPMA(r)
 	registerFiles(r)
+	registerFilesPlus(r)
 	registerBackup(r)
 	registerWordPress(r, deps)
 }
