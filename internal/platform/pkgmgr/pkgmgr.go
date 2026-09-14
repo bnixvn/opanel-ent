@@ -68,7 +68,12 @@ func Installed(ctx context.Context, names ...string) (bool, error) {
 	for i := range missing {
 		missing[i] = i + 1
 	}
-	res, err := run.Cmd(ctx, append([]string{"rpm", "-q", "--quiet"}, names...),
+	// --whatprovides, because dnf installs by capability and rpm queries by
+	// package name, and the two disagree: EL10 ships npm as nodejs-npm, so
+	// `dnf install npm` succeeds and `rpm -q npm` then says it is absent.
+	// Asking the same question dnf answered means the check agrees with the
+	// install instead of re-running it on every pass.
+	res, err := run.Cmd(ctx, append([]string{"rpm", "-q", "--quiet", "--whatprovides"}, names...),
 		run.AllowExit(missing...))
 	if err != nil {
 		return false, err
