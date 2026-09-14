@@ -43,7 +43,7 @@ export default function Php() {
           <div className="scroll">
             <table>
               <thead>
-                <tr><th>Version</th><th>Status</th><th>Interpreter</th><th /></tr>
+                <tr><th>Version</th><th>Status</th><th>ionCube</th><th>Interpreter</th><th /></tr>
               </thead>
               <tbody>
                 {data.versions.map((v) => (
@@ -52,6 +52,11 @@ export default function Php() {
                     <td>
                       {v.installed ? <Tag kind="ok">installed</Tag> : <Tag>available</Tag>}
                       {v.is_default && <> <Tag kind="mute">default</Tag></>}
+                    </td>
+                    <td>
+                      {!v.installed ? <span className="muted">—</span>
+                        : v.ioncube ? <Tag kind="ok">loaded</Tag>
+                          : <Tag kind="mute">not installed</Tag>}
                     </td>
                     <td className="muted">
                       {v.installed ? <code>{v.cli_path || v.lsapi_path}</code> : '—'}
@@ -100,8 +105,14 @@ export default function Php() {
           </div>
         )}
         <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
-          Each website chooses its own version on the Websites page. Installing
-          one here makes it available to choose.
+          Each website chooses its own version on the Websites page, and its
+          own php.ini settings from the Settings link beside it. Installing a
+          version here makes it available to choose.
+        </p>
+        <p className="muted" style={{ fontSize: '.83rem', marginBottom: 0 }}>
+          ionCube decodes commercially licensed PHP. It is installed with each
+          version when the repository carries it; software that needs it will
+          not run at all without it.
         </p>
       </Card>
     </>

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
 
@@ -113,6 +114,10 @@ type siteView struct {
 	ServeWAF bool
 
 	ACMEWebroot string
+
+	// PHPIniLines are the site's php.ini overrides, already rendered and
+	// sorted so the same settings always produce the same file.
+	PHPIniLines []string
 
 	MaxConns      int
 	MemSoftLimit  string
@@ -243,7 +248,19 @@ func (b *Backend) newSiteView(cfg webserver.ServerConfig, s webserver.Site) site
 		ProcSoftLimit: procSoft,
 		ProcHardLimit: procHard,
 		RewriteRules:  rewriteRules(s.RewriteMode),
+		// A suspended site runs no interpreter, so overrides for one would
+		// be directives attached to nothing.
+		PHPIniLines: phpIniLines(s),
 	}
+}
+
+// phpIniLines renders the site's overrides, or nothing when the site is not
+// running PHP at all.
+func phpIniLines(s webserver.Site) []string {
+	if !s.NeedsPHP() || s.Suspended || len(s.PHPSettings) == 0 {
+		return nil
+	}
+	return phpini.Render(s.PHPSettings)
 }
 
 // Render produces the complete configuration. It performs no I/O, so it is

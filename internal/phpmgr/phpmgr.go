@@ -30,6 +30,13 @@ type Version struct {
 	LSAPIPath string `json:"lsapi_path,omitempty"` // binary the webserver runs
 	CLIPath   string `json:"cli_path,omitempty"`   // binary WP-CLI and cron run
 	IsDefault bool   `json:"is_default,omitempty"`
+
+	// IonCube reports whether the loader is present for this version.
+	//
+	// Worth surfacing on its own rather than leaving in a phpinfo() page:
+	// encoded commercial software simply does not run without it, and
+	// "my application shows a blank page" is otherwise a long conversation.
+	IonCube bool `json:"ioncube"`
 }
 
 // Provider installs PHP versions and says where their files are.
@@ -55,6 +62,9 @@ type Provider interface {
 	CLIBinary(version string) string
 	// IniDropIn is the file the panel writes its php.ini overrides to.
 	IniDropIn(version string) string
+	// IonCubeLoader is the loader's shared object for this version. It may
+	// not exist; Available reports whether it does.
+	IonCubeLoader(version string) string
 }
 
 // ErrUnsupportedVersion is returned for a version the provider cannot install.

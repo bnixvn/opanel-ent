@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
@@ -145,6 +146,11 @@ type SiteSpec struct {
 	ForceHTTPS   bool     `json:"force_https"`
 	WAFEnabled   bool     `json:"waf_enabled"`
 	Suspended    bool     `json:"suspended"`
+	// PHPSettings are php.ini overrides for this site. The agent validates
+	// them again rather than trusting the panel: this is the process that
+	// writes the webserver's configuration, so it is the last place a bad
+	// value can be stopped.
+	PHPSettings map[string]string `json:"php_settings,omitempty"`
 }
 
 // WebserverApplyRequest carries the complete desired state.
@@ -191,6 +197,13 @@ func resolve(p phpmgr.Provider, specs []SiteSpec) ([]webserver.Site, error) {
 			ForceHTTPS:   sp.ForceHTTPS,
 			WAFEnabled:   sp.WAFEnabled,
 			Suspended:    sp.Suspended,
+		}
+		if len(sp.PHPSettings) > 0 {
+			checked, err := phpini.Check(sp.PHPSettings)
+			if err != nil {
+				return nil, fmt.Errorf("site %q: php settings: %w", sp.Domain, err)
+			}
+			s.PHPSettings = checked
 		}
 		if s.NeedsPHP() {
 			s.LSAPIBinary = p.LSAPIBinary(sp.PHPVersion)

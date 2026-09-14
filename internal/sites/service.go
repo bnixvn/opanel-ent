@@ -578,6 +578,12 @@ func (s *Service) SyncWebserver(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// One query for every site's overrides rather than one per site: this
+	// runs on every change to any site.
+	phpSettings, err := s.db.AllSitePHPSettings(ctx)
+	if err != nil {
+		return err
+	}
 	specs := make([]actions.SiteSpec, 0, len(rows))
 	for _, r := range rows {
 		specs = append(specs, actions.SiteSpec{
@@ -595,6 +601,7 @@ func (s *Service) SyncWebserver(ctx context.Context) error {
 			ForceHTTPS:   r.ForceHTTPS,
 			WAFEnabled:   r.WAFEnabled,
 			Suspended:    r.Suspended,
+			PHPSettings:  phpSettings[r.ID],
 		})
 	}
 	_, err = agentclient.Call[struct{}](ctx, s.agent, "webserver.apply", 1,

@@ -221,6 +221,20 @@ dl.kv dd { margin: 0; }
 }
 .banner.bad { background: var(--bad-bg); color: var(--bad); }
 
+/* A two-column form for pages with many small fields, such as the per-site
+   PHP settings. Collapses to one column on a narrow screen. */
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.9rem 1.2rem;
+  align-items: start;
+}
+.grid2 .field { flex: none; }
+
+.checks { display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
+.check { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; }
+.check input { width: auto; margin: 0; }
+
 @media (max-width: 60rem) {
   .shell { flex-direction: column; }
   .sidebar {

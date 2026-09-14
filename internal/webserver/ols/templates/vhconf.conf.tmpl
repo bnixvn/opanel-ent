@@ -83,6 +83,16 @@ extprocessor {{ .AppName }} {
 scripthandler {
     add                       lsapi:{{ .AppName }} php
 }
+{{- if .PHPIniLines }}
+
+# php.ini overrides for this site. php_admin_value rather than php_value: the
+# application must not be able to raise a limit the host set with ini_set().
+phpIniOverride {
+{{- range .PHPIniLines }}
+{{ . }}
+{{- end }}
+}
+{{- end }}
 {{- end }}
 
 {{ if .Site.Suspended -}}

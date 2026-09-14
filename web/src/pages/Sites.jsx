@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtDate } from '../api.js';
 import { Card, Empty, Message, Search, Secret, Tag, matches, useConfirm, useMessage } from '../components.jsx';
+import PhpSettings from './PhpSettings.jsx';
 
 export default function Sites({ me }) {
   const [sites, setSites] = useState([]);
@@ -12,6 +13,7 @@ export default function Sites({ me }) {
   const [installed, setInstalled] = useState(null);
   const msg = useMessage();
   const { ask, dialog } = useConfirm();
+  const [phpFor, setPhpFor] = useState(null);
 
   const staff = me.role === 'admin' || me.role === 'reseller';
 
@@ -83,6 +85,10 @@ export default function Sites({ me }) {
           <Secret label="Password" value={installed.admin_password} />
           <button type="button" onClick={() => setInstalled(null)}>Close</button>
         </Card>
+      )}
+
+      {phpFor && (
+        <PhpSettings site={phpFor} onClose={() => setPhpFor(null)} />
       )}
 
       <Card
@@ -191,16 +197,29 @@ export default function Sites({ me }) {
                       {s.app_type === 'static' ? (
                         <span className="muted">—</span>
                       ) : (
-                        <select
-                          value={s.php_version}
-                          onChange={(e) =>
-                            guard(
-                              () => api.patch(`/sites/${s.id}`, { php_version: e.target.value }),
-                              `PHP set to ${e.target.value}`,
-                            )}
-                        >
-                          {php.map((v) => <option key={v.version}>{v.version}</option>)}
-                        </select>
+                        <>
+                          <select
+                            value={s.php_version}
+                            onChange={(e) =>
+                              guard(
+                                () => api.patch(`/sites/${s.id}`, { php_version: e.target.value }),
+                                `PHP set to ${e.target.value}`,
+                              )}
+                          >
+                            {php.map((v) => <option key={v.version}>{v.version}</option>)}
+                          </select>
+                          <div>
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => setPhpFor(
+                                phpFor && phpFor.id === s.id ? null : s,
+                              )}
+                            >
+                              Settings
+                            </button>
+                          </div>
+                        </>
                       )}
                     </td>
                     <td><SslCell site={s} guard={guard} ask={ask} msg={msg} /></td>

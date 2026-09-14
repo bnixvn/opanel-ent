@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/bnixvn/opanel-ent/internal/phpini"
 )
 
 // Backend names.
@@ -102,6 +104,12 @@ type Site struct {
 
 	WAFEnabled bool
 	Suspended  bool
+
+	// PHPSettings are the site's php.ini overrides, already validated
+	// against internal/phpini. The renderer writes them verbatim, so
+	// anything that reaches here has to have been checked; Validate refuses
+	// a name or value that was not.
+	PHPSettings map[string]string
 }
 
 // NeedsPHP reports whether the site runs an interpreter.
@@ -162,6 +170,20 @@ func (s Site) Validate() error {
 		}
 		if err := validAbsPath(s.KeyFile, "private key"); err != nil {
 			return err
+		}
+	}
+	// php.ini overrides are written into the vhost verbatim, so the last
+	// check that they cannot carry a second directive belongs here, in the
+	// validation every backend runs.
+	for name, value := range s.PHPSettings {
+		if !s.NeedsPHP() {
+			return fmt.Errorf("static site %q must not carry php settings", s.Domain)
+		}
+		if _, ok := phpini.Lookup(name); !ok {
+			return fmt.Errorf("php setting %q is not one this panel manages", name)
+		}
+		if strings.ContainsAny(value, "\r\n{}") {
+			return fmt.Errorf("php setting %q has an unusable value", name)
 		}
 	}
 	return nil

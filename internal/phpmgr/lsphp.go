@@ -68,6 +68,11 @@ func (p *LSPHP) IniDropIn(version string) string {
 	return filepath.Join(p.dir(version), "etc", "php.d", "99-opanel.ini")
 }
 
+// IonCubeLoader is where the lsphpNN-ioncube package puts the loader.
+func (p *LSPHP) IonCubeLoader(version string) string {
+	return filepath.Join(p.dir(version), "lib64", "php", "modules", "ioncube_loader.so")
+}
+
 // Available reports which supported versions are installed.
 func (p *LSPHP) Available(ctx context.Context) ([]Version, error) {
 	out := make([]Version, 0, len(lsphpVersions))
@@ -81,6 +86,9 @@ func (p *LSPHP) Available(ctx context.Context) ([]Version, error) {
 		if installed {
 			ver.LSAPIPath = bin
 			ver.CLIPath = p.CLIBinary(v)
+			if st, err := os.Stat(p.IonCubeLoader(v)); err == nil && !st.IsDir() {
+				ver.IonCube = true
+			}
 		}
 		out = append(out, ver)
 	}
