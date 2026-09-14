@@ -94,8 +94,14 @@ func (s *Server) handleDatabaseList(w http.ResponseWriter, r *http.Request) {
 }
 
 type createDatabaseRequest struct {
-	Name    string `json:"name"`
+	Name string `json:"name"`
+	// Suffix is the same field under the name the interface uses; the panel
+	// adds the owner prefix either way.
+	Suffix  string `json:"suffix,omitempty"`
 	OwnerID int64  `json:"owner_id,omitempty"`
+	// WithoutUser skips the matching account, for the caller that wants to
+	// attach an existing one instead.
+	WithoutUser bool `json:"without_user,omitempty"`
 }
 
 func (s *Server) handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
@@ -104,14 +110,59 @@ func (s *Server) handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFrom(r.Context())
-	rec, err := s.databases.CreateDatabase(r.Context(), ownerFor(u, req.OwnerID), req.Name)
+	owner := ownerFor(u, req.OwnerID)
+	suffix := req.Name
+	if suffix == "" {
+		suffix = req.Suffix
+	}
+
+	rec, err := s.databases.CreateDatabase(r.Context(), owner, suffix)
 	if err != nil {
-		s.audit(r, "database.create", req.Name, false, err.Error())
+		s.audit(r, "database.create", suffix, false, err.Error())
 		s.databaseError(w, err)
 		return
 	}
 	s.audit(r, "database.create", rec.Name, true, "")
-	writeJSON(w, http.StatusCreated, viewDatabase(rec))
+
+	// A database with nothing able to reach it is not a useful thing to have
+	// created, and asking a customer to make an account and then grant it is
+	// three screens for one intention. The account comes with it, and the
+	// separate endpoints stay for the case that needs a second one -- a
+	// read-only reporting login, say.
+	if req.WithoutUser {
+		writeJSON(w, http.StatusCreated, map[string]any{"database": viewDatabase(rec)})
+		return
+	}
+
+	dbUser, password, err := s.databases.CreateUser(r.Context(), owner, suffix)
+	if err != nil {
+		// The database exists and is reported, because rolling it back would
+		// throw away a name the customer may already have typed elsewhere.
+		s.audit(r, "database.user.create", suffix, false, err.Error())
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"database": viewDatabase(rec),
+			"warning":  "the database was created but its account was not: " + err.Error(),
+		})
+		return
+	}
+	if err := s.databases.Grant(r.Context(), rec.ID, dbUser.ID); err != nil {
+		s.audit(r, "database.grant", rec.Name, false, err.Error())
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"database": viewDatabase(rec),
+			"user":     viewDBUser(dbUser),
+			"password": password,
+			"warning":  "the account was created but not granted access: " + err.Error(),
+		})
+		return
+	}
+	s.audit(r, "database.user.create", dbUser.Username, true, "with "+rec.Name)
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"database": viewDatabase(rec),
+		"user":     viewDBUser(dbUser),
+		"password": password,
+		"host":     databases.ConnectionHost,
+	})
 }
 
 func (s *Server) handleDatabaseDelete(w http.ResponseWriter, r *http.Request) {

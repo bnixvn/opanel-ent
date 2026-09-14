@@ -80,3 +80,8 @@ images.zip
 
 # Go build output
 /dist/
+
+# Frontend build inputs. The built output under internal/httpapi/web IS
+# committed: the Go binary embeds it, so `go build` has to work for anyone
+# who clones this without running npm first.
+web/node_modules/

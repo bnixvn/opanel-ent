@@ -81,6 +81,8 @@ func (s *Server) routes() http.Handler {
 		// Unauthenticated.
 		api.Get("/health", s.handleHealth)
 		api.Post("/auth/login", s.handleLogin)
+		// The login page needs the brand before anyone has signed in.
+		api.Get("/branding", s.handleBranding)
 
 		// Authenticated.
 		api.Group(func(pr chi.Router) {
@@ -128,6 +130,8 @@ func (s *Server) routes() http.Handler {
 			// reads anyone's with ?user=<id>.
 			pr.Get("/reseller", s.handleResellerSummary)
 			pr.Get("/quota/status", s.handleQuotaStatus)
+			pr.Get("/notifications", s.handleNotificationGet)
+			pr.Put("/notifications", s.handleNotificationSet)
 
 			// Files. The service resolves whose home is in play, so an end
 			// user reaches the same routes and can only ever see their own.
@@ -183,6 +187,11 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/php/versions/{version}/install", s.handlePHPInstall)
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
+				ar.Get("/settings", s.handleSettings)
+				ar.Put("/settings/branding", s.handleBrandingSet)
+				ar.Post("/settings/hostnames", s.handleHostnameAdd)
+				ar.Delete("/settings/hostnames", s.handleHostnameDelete)
+				ar.Put("/settings/ipv6", s.handleIPv6Set)
 				ar.Put("/users/{id}/reseller-limits", s.handleResellerLimitsSet)
 				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})

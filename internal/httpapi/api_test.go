@@ -357,9 +357,47 @@ func TestUIIsServed(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("GET / content type = %q, want text/html", ct)
 	}
+	// The title is set at runtime from the brand, so the assertion is on
+	// what the build always emits: the mount point and the module bundle.
 	body, _ := io.ReadAll(resp.Body)
-	if !bytes.Contains(body, []byte("<title>OPanel</title>")) {
-		t.Fatal("the served page is not the panel interface")
+	if !bytes.Contains(body, []byte(`id="root"`)) {
+		t.Fatal("the served page has no mount point; was the frontend built?")
+	}
+	if !bytes.Contains(body, []byte("/assets/")) {
+		t.Fatal("the served page references no bundle; was the frontend built?")
+	}
+}
+
+func TestUIAssetsAreServed(t *testing.T) {
+	// A deep link falls back to index.html, which must not swallow the
+	// bundle it asks for -- that failure looks like a blank page.
+	f := newFixture(t)
+	page, err := http.Get(f.srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(page.Body)
+	_ = page.Body.Close()
+
+	// src="/assets/index-XXXX.js"
+	i := bytes.Index(body, []byte(`src="/assets/`))
+	if i < 0 {
+		t.Skip("no bundle reference to check")
+	}
+	rest := body[i+len(`src="`):]
+	j := bytes.IndexByte(rest, '"')
+	asset := string(rest[:j])
+
+	resp, err := http.Get(f.srv.URL + asset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s returned %d, want 200", asset, resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Fatalf("GET %s content type = %q, want JavaScript", asset, ct)
 	}
 }
 
