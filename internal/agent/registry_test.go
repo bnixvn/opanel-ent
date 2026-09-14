@@ -145,3 +145,27 @@ func TestReadRequestAcceptsValid(t *testing.T) {
 		t.Fatalf("decoded %+v", req)
 	}
 }
+
+// A mistyped action name and a stale caller are different problems with
+// different fixes, and the codes are how the panel tells them apart. They
+// were conflated: the version was used to guess which had happened, so any
+// request carrying one -- which is all of them -- reported a version
+// mismatch even when the action did not exist.
+func TestLookupDistinguishesUnknownFromMismatch(t *testing.T) {
+	r := newTestRegistry()
+
+	_, err := r.lookup("no-such-action", 1)
+	var unknown ErrUnknownAction
+	if !errors.As(err, &unknown) {
+		t.Fatalf("a missing action gave %T: %v", err, err)
+	}
+
+	_, err = r.lookup("echo", 99)
+	var mismatch ErrVersionMismatch
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("a wrong version gave %T: %v", err, err)
+	}
+	if mismatch.Wanted != 99 {
+		t.Errorf("wanted version %d in the error, got %d", 99, mismatch.Wanted)
+	}
+}

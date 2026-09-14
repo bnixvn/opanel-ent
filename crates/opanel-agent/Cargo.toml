@@ -1,0 +1,23 @@
+[package]
+name = "opanel-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "The privileged side of OPanel: a fixed set of named operations behind a unix socket"
+publish = false
+
+[dependencies]
+# Deliberately small. No async runtime: the agent serves one request per
+# connection and a terminal session is two threads, which threads express
+# more plainly than futures and without pulling a scheduler into a root
+# process.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

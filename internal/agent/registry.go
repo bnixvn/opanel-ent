@@ -115,13 +115,36 @@ func (r *Registry) lookup(name string, version int) (handler, error) {
 	h, ok := r.actions[name]
 	r.mu.RUnlock()
 	if !ok {
-		return handler{}, fmt.Errorf("unknown action %q", name)
+		return handler{}, ErrUnknownAction{Name: name}
 	}
+	// Zero means "whatever the agent has", for opanelctl and for anybody
+	// holding a socket open by hand. Every call from the panel pins a
+	// version, which is where the guarantee is needed and where it applies.
 	if version != 0 && version != h.version {
-		return handler{}, fmt.Errorf("action %q is version %d, caller asked for %d",
-			name, h.version, version)
+		return handler{}, ErrVersionMismatch{Name: name, Has: h.version, Wanted: version}
 	}
 	return h, nil
+}
+
+// ErrUnknownAction and ErrVersionMismatch are distinct types because the
+// caller has to tell them apart to pick a code, and it used to guess: it
+// reported version_mismatch whenever the request carried a version, which
+// every real request does. A mistyped action name therefore came back as a
+// version problem, which is the one answer guaranteed to send somebody
+// looking in the wrong place.
+type ErrUnknownAction struct{ Name string }
+
+func (e ErrUnknownAction) Error() string { return fmt.Sprintf("unknown action %q", e.Name) }
+
+// ErrVersionMismatch means the action exists but not at the version asked for.
+type ErrVersionMismatch struct {
+	Name   string
+	Has    int
+	Wanted int
+}
+
+func (e ErrVersionMismatch) Error() string {
+	return fmt.Sprintf("action %q is version %d, caller asked for %d", e.Name, e.Has, e.Wanted)
 }
 
 // Actions lists registered action names with their versions, sorted. Used by

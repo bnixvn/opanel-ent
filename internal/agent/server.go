@@ -226,8 +226,13 @@ func (s *Server) uidAllowed(uid uint32) bool {
 func (s *Server) dispatch(ctx context.Context, req Request) Response {
 	h, err := s.opts.Registry.lookup(req.Action, req.Version)
 	if err != nil {
-		code := CodeUnknownAction
-		if req.Version != 0 {
+		code := CodeInternal
+		var unknown ErrUnknownAction
+		var mismatch ErrVersionMismatch
+		switch {
+		case errors.As(err, &unknown):
+			code = CodeUnknownAction
+		case errors.As(err, &mismatch):
 			code = CodeVersionMismatch
 		}
 		return Response{ID: req.ID, OK: false, Code: code, Error: err.Error()}
