@@ -160,16 +160,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
-// Close stops accepting and waits for in-flight handlers.
-func (s *Server) Close() error {
-	if s.ln == nil {
-		return nil
-	}
-	s.closeOne.Do(func() { _ = s.ln.Close() })
-	s.wg.Wait()
-	return nil
-}
-
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 

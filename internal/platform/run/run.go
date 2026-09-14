@@ -87,12 +87,6 @@ func Stdin(s string) Option { return func(o *options) { o.stdin = s } }
 // server.
 func StdinFrom(r io.Reader) Option { return func(o *options) { o.stdinFrom = r } }
 
-// Env appends "KEY=value" entries to the inherited environment.
-func Env(kv ...string) Option { return func(o *options) { o.env = append(o.env, kv...) } }
-
-// Dir sets the working directory.
-func Dir(d string) Option { return func(o *options) { o.dir = d } }
-
 // AllowExit marks extra exit codes as success.
 func AllowExit(codes ...int) Option {
 	return func(o *options) { o.okCodes = append(o.okCodes, codes...) }

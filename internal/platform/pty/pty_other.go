@@ -1,16 +1,22 @@
 //go:build !linux
 
 // A pseudo-terminal here is Linux ioctls and nothing else. The agent only
-// ever runs on Linux; this exists so the package still builds on a
-// developer's machine.
+// ever runs on Linux; this exists so the package -- and everything that
+// imports it, which is most of the panel -- still compiles on a developer's
+// machine. Tests that only run in CI are tests nobody runs.
 package pty
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 // Terminal is the unsupported stand-in.
-type Terminal struct{ Master *nothing }
-
-type nothing struct{}
+//
+// Master is a real *os.File, always nil, because callers read and write it:
+// a placeholder type without those methods would compile here and break
+// every package that uses this one.
+type Terminal struct{ Master *os.File }
 
 // Options mirrors the Linux definition so callers compile.
 type Options struct {
@@ -27,14 +33,11 @@ type Options struct {
 
 var errUnsupported = errors.New("pty: only supported on Linux")
 
-// Start always fails off Linux.
+// Start always fails off Linux, so nothing ever holds a Terminal here.
 func Start(Options) (*Terminal, error) { return nil, errUnsupported }
 
 // Resize always fails off Linux.
 func (t *Terminal) Resize(uint16, uint16) error { return errUnsupported }
-
-// Wait always fails off Linux.
-func (t *Terminal) Wait() error { return errUnsupported }
 
 // Close does nothing off Linux.
 func (t *Terminal) Close() {}

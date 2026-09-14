@@ -303,17 +303,6 @@ func viewPasskeys(keys []*db.Passkey) []passkeyView {
 	return out
 }
 
-func parseInt64(s string) int64 {
-	var n int64
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int64(c-'0')
-	}
-	return n
-}
-
 // credentialID is the stored form of a credential's id.
 func credentialID(c *webauthn.Credential) string {
 	return base64.RawURLEncoding.EncodeToString(c.ID)

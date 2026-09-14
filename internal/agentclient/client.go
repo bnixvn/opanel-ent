@@ -53,12 +53,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("agent action %s failed (%s): %s", e.Action, e.Code, e.Msg)
 }
 
-// IsDenied reports whether err is an agent refusal by policy.
-func IsDenied(err error) bool {
-	var ae *Error
-	return errors.As(err, &ae) && ae.Code == agent.CodeDenied
-}
-
 // Ping checks that the agent is reachable and answering.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := Call[PingResult](ctx, c, "ping", 1, struct{}{})

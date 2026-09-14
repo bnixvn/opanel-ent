@@ -35,3 +35,41 @@ func TestHome(t *testing.T) {
 		t.Errorf("Home = %q", got)
 	}
 }
+
+// The three name rules answer three different questions, and conflating them
+// is what broke the panel for an operator whose account is called admin:
+// every action refused to touch it, because the rule for handing names out
+// was being asked whether an existing account could be used.
+func TestNameRulesAnswerDifferentQuestions(t *testing.T) {
+	cases := []struct {
+		name                          string
+		plausible, validOwner, create bool
+	}{
+		// A system account: never, by any rule.
+		{"root", true, false, false},
+		{"mysql", true, false, false},
+		{"opanel", true, false, false},
+		// Confusing, but a real account the panel may have made. Refused to a
+		// new customer; usable once it exists.
+		{"admin", true, true, false},
+		{"test", true, true, false},
+		// An ordinary customer.
+		{"alice", true, true, true},
+		{"alice_deploy", true, true, true},
+		// Not the right shape at all.
+		{"Alice", false, false, false},
+		{"../etc", false, false, false},
+		{"a", false, false, false},
+	}
+	for _, c := range cases {
+		if got := PlausibleName(c.name); got != c.plausible {
+			t.Errorf("PlausibleName(%q) = %v, want %v", c.name, got, c.plausible)
+		}
+		if got := ValidOwner(c.name); got != c.validOwner {
+			t.Errorf("ValidOwner(%q) = %v, want %v", c.name, got, c.validOwner)
+		}
+		if got := ValidName(c.name); got != c.create {
+			t.Errorf("ValidName(%q) = %v, want %v", c.name, got, c.create)
+		}
+	}
+}

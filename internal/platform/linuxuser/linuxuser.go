@@ -16,7 +16,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
@@ -38,19 +37,45 @@ const SFTPGroup = "opanel-sftp"
 // so the panel accepts only the conservative subset.
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
 
-// reserved lists names that must never be handed to a customer. Taking one
-// over would let a site's PHP run as a system account.
-var reserved = []string{
+// systemNames belong to the distribution or to this panel's own services.
+// Nothing the panel does may ever act as one: a site whose PHP ran as mysql,
+// or a backup taken "as root", is the whole game lost in one step. This list
+// is checked on the way in and on the way out -- creating an account and
+// acting on one.
+var systemNames = []string{
 	"root", "bin", "daemon", "adm", "lp", "sync", "shutdown", "halt", "mail",
 	"operator", "games", "ftp", "nobody", "systemd-network", "dbus", "polkitd",
 	"sshd", "chrony", "mysql", "mariadb", "valkey", "redis", "clamav", "apache",
 	"nginx", "www-data", "lsadm", "opanel", "opanel-web", "postfix", "named",
-	"admin", "test", "user", "guest",
 }
 
-// ValidName reports whether n may be used for a site account.
+// confusingNames are not system accounts and would work perfectly well. They
+// are refused to customers because a customer called admin is a customer who
+// looks like staff in every log and every directory listing.
+//
+// Only when handing a name out. An operator whose panel account is already
+// called admin has one of these, legitimately, and refusing to back up their
+// files or set their password on the strength of the name is how a rule
+// about naming turns into a panel that does not work.
+var confusingNames = []string{"admin", "test", "user", "guest"}
+
+// ValidName reports whether n may be given to a new account.
 func ValidName(n string) bool {
-	return namePattern.MatchString(n) && !slices.Contains(reserved, n)
+	return namePattern.MatchString(n) &&
+		!slices.Contains(systemNames, n) &&
+		!slices.Contains(confusingNames, n)
+}
+
+// ValidOwner reports whether n may be acted upon as the owner of something.
+//
+// The check for an account that already exists. Wider than ValidName, because
+// the panel creates accounts a customer may not ask for; narrower than the
+// pattern alone, because no request may ever name a system account however it
+// arrived. That last part is defence in depth: the panel resolves an owner
+// from the session and would not send "root" -- and the agent refuses it
+// anyway, because the agent not trusting the panel is the design.
+func ValidOwner(n string) bool {
+	return namePattern.MatchString(n) && !slices.Contains(systemNames, n)
 }
 
 // ErrExists means the account is already present.
@@ -69,10 +94,10 @@ func Home(username string) string { return path.Join(HomeBase, username) }
 
 // Lookup returns an existing account, or nil when it does not exist.
 func Lookup(username string) (*Account, error) {
-	// The name pattern only: a reserved name is one this package refuses to
-	// create, not one it refuses to look at. Checking reservation here would
-	// mean the code that has to ask "is root already an account" cannot.
-	if !namePattern.MatchString(username) {
+	// The shape only: a reserved name is one this package refuses to create,
+	// not one it refuses to look at. Checking reservation here would stop the
+	// code that has to ask "is root already an account" from asking.
+	if !PlausibleName(username) {
 		return nil, fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	u, err := user.Lookup(username)
@@ -168,7 +193,7 @@ func create(ctx context.Context, username string) (*Account, error) {
 // Delete removes an account. The home directory goes with it only when
 // removeHome is set, so an accidental delete does not destroy customer data.
 func Delete(ctx context.Context, username string, removeHome bool) error {
-	if !PlausibleName(username) {
+	if !ValidOwner(username) {
 		return fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	acct, err := Lookup(username)
@@ -213,7 +238,7 @@ func Delete(ctx context.Context, username string, removeHome bool) error {
 
 // SetPassword sets the account password, used for SFTP access.
 func SetPassword(ctx context.Context, username, password string) error {
-	if !PlausibleName(username) {
+	if !ValidOwner(username) {
 		return fmt.Errorf("linuxuser: %q is not an acceptable account name", username)
 	}
 	if password == "" {
@@ -420,8 +445,8 @@ func RepairHome(username string) (bool, error) {
 	}
 
 	changed := false
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		if sys.Uid != 0 || int64(sys.Gid) != acct.GID {
+	if uid, gid, known := ownerOf(st); known {
+		if uid != 0 || gid != acct.GID {
 			if err := os.Chown(acct.Home, 0, int(acct.GID)); err != nil {
 				return false, fmt.Errorf("linuxuser: chown %s: %w", acct.Home, err)
 			}
@@ -501,7 +526,7 @@ const SystemUIDMax = 1000
 // an account the panel did not create is one it has no business touching
 // whatever it happens to be called.
 func Managed(username string) (bool, error) {
-	if !namePattern.MatchString(username) {
+	if !PlausibleName(username) {
 		return false, nil
 	}
 	names, err := groupMembers(SFTPGroup)
@@ -512,18 +537,14 @@ func Managed(username string) (bool, error) {
 }
 
 // PlausibleName reports whether a name is the right shape for a Linux
-// account, without judging whether it may be used.
+// account, without judging whether it may be used at all.
 //
-// This is the check for anything acting on an account that already exists,
-// and ValidName is the check for choosing a new one. The distinction matters
-// because the reserved list inside ValidName answers "may a customer be
-// called this", which is a question about names being handed out -- and
-// applying it to an account the panel itself made means refusing to list,
-// back up, schedule cron for or change the password of an operator called
-// admin.
+// The weakest of the three, and only for code that has to be able to ask
+// about any account -- looking one up, or reading whether it is in a group.
+// Acting on one wants ValidOwner; creating one wants ValidName.
 //
-// Nothing is given up by the swap. The property these callers actually need
-// is that a name cannot carry a path or a shell metacharacter into a command
-// or a directory, and that is the pattern, which both share: lowercase
-// letters, digits, underscore and hyphen, starting with a letter.
+// What all three share is the part that matters for safety: the pattern.
+// Lowercase letters, digits, underscore and hyphen, starting with a letter,
+// which is what stops a name carrying a path or a shell metacharacter into a
+// command or a directory.
 func PlausibleName(n string) bool { return namePattern.MatchString(n) }

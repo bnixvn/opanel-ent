@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"strings"
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
@@ -284,9 +283,3 @@ const ConnectionHost = "localhost"
 // VisibleTo is gone. Listings take an auth.ScopeFor(user) now, which can
 // express "mine and my customers'" -- the case a reseller needs and a single
 // owner id cannot describe.
-
-// SuffixOf strips the owner prefix for display, so a user sees the part they
-// chose rather than the full name every time.
-func SuffixOf(owner, full string) string {
-	return strings.TrimPrefix(full, owner+"_")
-}

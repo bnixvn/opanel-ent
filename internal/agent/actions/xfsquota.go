@@ -51,7 +51,7 @@ type QuotaSetRequest struct {
 
 // Validate checks the account and the size.
 func (r *QuotaSetRequest) Validate() error {
-	if !linuxuser.PlausibleName(r.Username) {
+	if !linuxuser.ValidOwner(r.Username) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Username)
 	}
 	if r.LimitMB < 0 {

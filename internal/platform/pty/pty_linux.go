@@ -122,9 +122,6 @@ func (t *Terminal) Resize(cols, rows uint16) error {
 	})
 }
 
-// Wait blocks until the process exits.
-func (t *Terminal) Wait() error { return t.cmd.Wait() }
-
 // Close kills the process and releases both ends.
 //
 // The signal goes to the process group, not the process: the shell is the

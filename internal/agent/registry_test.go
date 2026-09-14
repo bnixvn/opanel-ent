@@ -122,19 +122,6 @@ func TestDuplicateRegistrationPanics(t *testing.T) {
 	Register(r, "dup", 1, func(context.Context, struct{}) (struct{}, error) { return struct{}{}, nil })
 }
 
-func TestSortedNames(t *testing.T) {
-	r := newTestRegistry()
-	names := r.SortedNames()
-	if len(names) != 3 {
-		t.Fatalf("got %d actions, want 3", len(names))
-	}
-	for i := 1; i < len(names); i++ {
-		if names[i-1] > names[i] {
-			t.Fatalf("names are not sorted: %v", names)
-		}
-	}
-}
-
 func TestReadRequestRejectsGarbage(t *testing.T) {
 	for name, in := range map[string]string{
 		"empty":     "",

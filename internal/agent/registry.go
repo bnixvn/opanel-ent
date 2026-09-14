@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 )
@@ -135,15 +134,4 @@ func (r *Registry) Actions() map[string]int {
 		out[k] = v.version
 	}
 	return out
-}
-
-// SortedNames returns action names in a stable order.
-func (r *Registry) SortedNames() []string {
-	m := r.Actions()
-	names := make([]string, 0, len(m))
-	for k := range m {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	return names
 }

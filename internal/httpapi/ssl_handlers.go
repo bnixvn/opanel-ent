@@ -7,7 +7,6 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
-	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/db"
 )
 
@@ -222,13 +221,4 @@ func baseDomain(host string) string {
 		return host
 	}
 	return strings.Join(parts[1:], ".")
-}
-
-// requireSiteOwner is the ownership test the SSL routes share.
-func (s *Server) requireSiteOwner(w http.ResponseWriter, r *http.Request, site *db.Site) bool {
-	if auth.OwnsResource(userFrom(r.Context()), site.OwnerID, site.OwnerParentID) {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "not_found", "no such website")
-	return false
 }

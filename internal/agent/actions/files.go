@@ -40,7 +40,7 @@ type FilePathRequest struct {
 // Validate checks the owner and rejects an absolute path, which would be a
 // caller mistake rather than something to reinterpret.
 func (r *FilePathRequest) Validate() error {
-	if !linuxuser.PlausibleName(r.Owner) {
+	if !linuxuser.ValidOwner(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	return validRelPath(r.Path)

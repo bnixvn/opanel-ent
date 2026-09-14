@@ -51,14 +51,6 @@ func CanManage(actor, target *db.User) bool {
 	}
 }
 
-// CanOwn reports whether actor may create resources on behalf of ownerID.
-func CanOwn(actor *db.User, owner *db.User) bool {
-	if actor.ID == owner.ID {
-		return true
-	}
-	return CanManage(actor, owner)
-}
-
 // OwnsResource reports whether actor may act on something owned by ownerID.
 // parentOf is the owner's reseller, zero when they have none.
 func OwnsResource(actor *db.User, ownerID, parentOf int64) bool {

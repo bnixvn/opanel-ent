@@ -225,29 +225,6 @@ func (s *Server) requireRole(min auth.Role) func(http.Handler) http.Handler {
 	}
 }
 
-// requireScope gates a route used by machine callers. A session-authenticated
-// request carries no token and passes on its role alone; a token must name
-// the scope explicitly.
-func (s *Server) requireScope(scope auth.Scope) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			tok := tokenFrom(r.Context())
-			if tok == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			for _, s := range tok.Scopes {
-				if s == string(scope) {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			writeError(w, http.StatusForbidden, "missing_scope",
-				"token lacks required scope "+string(scope))
-		})
-	}
-}
-
 func (s *Server) setSessionCookie(w http.ResponseWriter, value string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,

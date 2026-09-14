@@ -205,20 +205,6 @@ func rootFilesystem(ctx context.Context) (fsType, options string, err error) {
 	return fields[0], fields[1], nil
 }
 
-// QuotaNeedsReboot reports whether the kernel argument is set but not yet in
-// effect, which is what the installer prints and the panel shows as a banner.
-func QuotaNeedsReboot(ctx context.Context) bool {
-	_, opts, err := rootFilesystem(ctx)
-	if err != nil {
-		return false
-	}
-	if strings.Contains(opts, "prjquota") {
-		return false
-	}
-	armed, _ := checkProjectQuota(ctx, nil)
-	return armed
-}
-
 func checkFile(path string) func(context.Context, *Options) (bool, error) {
 	return func(context.Context, *Options) (bool, error) {
 		_, err := os.Stat(path)

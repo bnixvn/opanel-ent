@@ -142,26 +142,6 @@ func (m *Manager) Issue(ctx context.Context, domains []string) (*Certificate, er
 	return &Certificate{Domains: domains, CertFile: certPath, KeyFile: keyPath, NotAfter: notAfter}, nil
 }
 
-// Load reads an already-issued certificate.
-func (m *Manager) Load(domain string) (*Certificate, error) {
-	dir := filepath.Join(m.CertDir, domain)
-	certPath := filepath.Join(dir, certFileName)
-	pemBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		return nil, err
-	}
-	notAfter, err := expiryOf(pemBytes)
-	if err != nil {
-		return nil, err
-	}
-	return &Certificate{
-		Domains:  []string{domain},
-		CertFile: certPath,
-		KeyFile:  filepath.Join(dir, keyFileName),
-		NotAfter: notAfter,
-	}, nil
-}
-
 func (m *Manager) client() (*lego.Client, error) {
 	acct, err := m.loadOrRegister()
 	if err != nil {

@@ -39,7 +39,7 @@ type LogTailRequest struct {
 
 // Validate checks the account, the site and the log name.
 func (r *LogTailRequest) Validate() error {
-	if !linuxuser.PlausibleName(r.Owner) {
+	if !linuxuser.ValidOwner(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	// The domain becomes a directory name under the home, so it must not be

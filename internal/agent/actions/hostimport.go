@@ -64,7 +64,7 @@ func (r *ImportExtractRequest) Validate() error {
 	if err := (&ImportInspectRequest{StagedPath: r.StagedPath}).Validate(); err != nil {
 		return err
 	}
-	if !linuxuser.PlausibleName(r.Owner) {
+	if !linuxuser.ValidOwner(r.Owner) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Owner)
 	}
 	if len(r.Moves) == 0 {

@@ -127,16 +127,6 @@ func (s *TerminalServer) Serve(ctx context.Context) error {
 	}
 }
 
-// Close stops accepting and waits for live sessions.
-func (s *TerminalServer) Close() error {
-	if s.ln == nil {
-		return nil
-	}
-	s.once.Do(func() { _ = s.ln.Close() })
-	s.wg.Wait()
-	return nil
-}
-
 func (s *TerminalServer) session(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
@@ -204,7 +194,7 @@ func (s *TerminalServer) resolve(username string) (*linuxuser.Account, error) {
 	// check, and it is the one that means something: ValidName refuses names
 	// a customer may not take, which is a different question and would bar
 	// an operator from their own.
-	if !linuxuser.PlausibleName(username) {
+	if !linuxuser.ValidOwner(username) {
 		return nil, errors.New("not an account name")
 	}
 	managed, err := linuxuser.List(context.Background())

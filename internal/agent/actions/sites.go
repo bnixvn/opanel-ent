@@ -52,7 +52,7 @@ type AccountDeleteRequest struct {
 // makes accounts a customer may not ask for, and refusing to delete one on
 // the same rule that refuses to create it would strand them.
 func (r *AccountDeleteRequest) Validate() error {
-	if !linuxuser.PlausibleName(r.Username) {
+	if !linuxuser.ValidOwner(r.Username) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Username)
 	}
 	return nil
@@ -96,7 +96,7 @@ type AccountPasswordRequest struct {
 // Whether the account may have its password set is decided in the handler,
 // against the group file.
 func (r *AccountPasswordRequest) Validate() error {
-	if !linuxuser.PlausibleName(r.Username) {
+	if !linuxuser.ValidOwner(r.Username) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Username)
 	}
 	if len(r.Password) < 12 {
@@ -121,7 +121,7 @@ func (r *SiteProvisionRequest) Validate() error {
 	if !webserver.ValidDomain(r.Domain) {
 		return fmt.Errorf("domain %q is not a valid hostname", r.Domain)
 	}
-	if !linuxuser.PlausibleName(r.Owner) {
+	if !linuxuser.ValidOwner(r.Owner) {
 		return fmt.Errorf("owner %q is not an acceptable account name", r.Owner)
 	}
 	home := linuxuser.Home(r.Owner)
