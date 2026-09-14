@@ -245,6 +245,11 @@ func (s *Server) routes() http.Handler {
 			// refuse anything above that.
 			pr.Group(func(rr chi.Router) {
 				rr.Use(s.requireRole(auth.RoleReseller))
+				// Importing an account creates websites and databases for
+				// somebody else, so it is not a customer's button.
+				rr.Post("/import/upload", s.handleImportUpload)
+				rr.Post("/import/run", s.handleImportRun)
+				rr.Delete("/import", s.handleImportDiscard)
 				rr.Get("/users", s.handleUserList)
 				rr.Post("/users", s.handleUserCreate)
 				rr.Patch("/users/{id}", s.handleUserUpdate)

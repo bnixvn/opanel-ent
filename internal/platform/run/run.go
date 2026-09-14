@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -62,8 +63,11 @@ type Option func(*options)
 type options struct {
 	timeout time.Duration
 	stdin   string
-	env     []string
-	dir     string
+	// stdinFrom streams input instead of holding it in memory, for the cases
+	// where the input is a database dump rather than a short string.
+	stdinFrom io.Reader
+	env       []string
+	dir       string
 	// okCodes lists exit codes to treat as success besides 0. dnf uses 100
 	// for "updates available", which is information rather than failure.
 	okCodes []int
@@ -74,6 +78,14 @@ func Timeout(d time.Duration) Option { return func(o *options) { o.timeout = d }
 
 // Stdin feeds data to the command.
 func Stdin(s string) Option { return func(o *options) { o.stdin = s } }
+
+// StdinFrom streams input to the command.
+//
+// Separate from Stdin because the caller that needs it is feeding a database
+// dump out of a tar archive: holding that in a string would mean the whole
+// dump in memory, twice, at the moment a migration is already filling the
+// server.
+func StdinFrom(r io.Reader) Option { return func(o *options) { o.stdinFrom = r } }
 
 // Env appends "KEY=value" entries to the inherited environment.
 func Env(kv ...string) Option { return func(o *options) { o.env = append(o.env, kv...) } }
@@ -106,7 +118,10 @@ func Cmd(ctx context.Context, argv []string, opts ...Option) (Result, error) {
 	if len(o.env) > 0 {
 		cmd.Env = append(cmd.Environ(), o.env...)
 	}
-	if o.stdin != "" {
+	switch {
+	case o.stdinFrom != nil:
+		cmd.Stdin = o.stdinFrom
+	case o.stdin != "":
 		cmd.Stdin = strings.NewReader(o.stdin)
 	}
 	var stdout, stderr bytes.Buffer

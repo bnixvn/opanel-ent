@@ -7,6 +7,7 @@ import Databases from './pages/Databases.jsx';
 import WordPress from './pages/WordPress.jsx';
 import Malware from './pages/Malware.jsx';
 import Cron from './pages/Cron.jsx';
+import Import from './pages/Import.jsx';
 import Files from './pages/Files.jsx';
 import Backups from './pages/Backups.jsx';
 import Ssl from './pages/Ssl.jsx';
@@ -41,6 +42,7 @@ const MENU = [
   { group: 'Server', roles: ['admin', 'reseller'], items: [
     { to: '/users', label: 'Users', roles: ['admin', 'reseller'] },
     { to: '/packages', label: 'Packages', roles: ['admin', 'reseller'] },
+    { to: '/import', label: 'Import', roles: ['admin', 'reseller'] },
     { to: '/php', label: 'PHP', roles: ['admin'] },
     { to: '/system', label: 'System', roles: ['admin'] },
     { to: '/settings', label: 'Settings', roles: ['admin'] },
@@ -217,6 +219,7 @@ export default function App() {
                   )}
                 />
                 <Route path="/packages" element={<Packages me={me} />} />
+                <Route path="/import" element={<Import me={me} />} />
               </>
             )}
             {role === 'admin' && (

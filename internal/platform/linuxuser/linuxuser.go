@@ -172,6 +172,14 @@ func Delete(ctx context.Context, username string, removeHome bool) error {
 	// directory the account does not own. It removes the account, reports an
 	// error, and leaves every file behind — which reads as a failed delete
 	// when the account is in fact already gone.
+	// Anything still running as the account has to go first. userdel refuses
+	// while a process survives, and on a hosting server there always is one
+	// for a moment: deleting a website leaves its PHP workers alive until
+	// they notice, and the delete that follows fails with "user is currently
+	// used by process" -- leaving the panel's record gone and the Linux
+	// account behind, which is the worst of both.
+	stopProcesses(ctx, username)
+
 	if _, err := run.Cmd(ctx, []string{"userdel", username}, run.Timeout(120*time.Second)); err != nil {
 		return fmt.Errorf("linuxuser: delete %q: %w", username, err)
 	}
@@ -275,4 +283,24 @@ func groupMembers(group string) ([]string, error) {
 		return out, nil
 	}
 	return nil, nil
+}
+
+// stopProcesses ends anything running as an account, politely and then not.
+//
+// Best effort throughout: pkill exits non-zero when it matched nothing, which
+// is the normal case and not a failure. What matters is that userdel is not
+// asked while a process is still holding the account open.
+func stopProcesses(ctx context.Context, username string) {
+	if _, err := run.Cmd(ctx, []string{"pkill", "-TERM", "-u", username},
+		run.Timeout(15*time.Second), run.AllowExit(1)); err != nil {
+		return
+	}
+	// A moment to exit cleanly, then the rest.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(2 * time.Second):
+	}
+	_, _ = run.Cmd(ctx, []string{"pkill", "-KILL", "-u", username},
+		run.Timeout(15*time.Second), run.AllowExit(1))
 }

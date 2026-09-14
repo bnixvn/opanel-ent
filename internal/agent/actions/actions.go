@@ -50,6 +50,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerClamAV(r)
 	registerCron(r)
 	registerDestinations(r)
+	registerHostImport(r)
 }
 
 // PingResult is the reply to "ping".
