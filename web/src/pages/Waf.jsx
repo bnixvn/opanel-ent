@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Hint, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
 const MODES = [
   { id: 'detect', label: 'Log only' },
@@ -158,9 +158,7 @@ export default function Waf() {
                     <td>
                       {r.title}
                       {r.required && <> <Tag kind="mute">needed</Tag></>}
-                      {r.help && (
-                        <div className="muted" style={{ fontSize: '.78rem' }}>{r.help}</div>
-                      )}
+                      <Hint>{r.help}</Hint>
                       <div className="muted" style={{ fontSize: '.72rem' }}><code>{r.file}</code></div>
                     </td>
                     <td className="muted nowrap">{r.rules || '—'}</td>

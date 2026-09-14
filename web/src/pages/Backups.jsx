@@ -261,9 +261,6 @@ export default function Backups({ me }) {
           >
             <input type="file" accept=".gz,.tgz" ref={archive} style={{ width: 'auto' }} />{' '}
             <button type="submit">Upload an archive</button>
-            <div className="muted" style={{ marginTop: '.4rem', fontSize: '.85rem' }}>
-              Brings a .tar.gz written by this panel back onto the server, ready to restore.
-            </div>
           </div>
         </form>
       </Card>

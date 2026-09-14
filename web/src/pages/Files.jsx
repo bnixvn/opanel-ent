@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api, download, fmtBytes, fmtDate } from '../api.js';
-import { Card, Empty, Message, useConfirm, useMessage } from '../components.jsx';
+import { Card, Empty, Hint, Message, useConfirm, useMessage } from '../components.jsx';
 
 // The editor is most of the interface's JavaScript, and it is only needed by
 // somebody who has opened a file. Loading it separately keeps the login page
@@ -367,7 +367,12 @@ export default function Files({ me }) {
             }}
           >
             <div className="field" style={{ flex: '0 1 20rem' }}>
-              <label htmlFor="arcName">Archive name</label>
+              <label htmlFor="arcName">
+                Archive name
+                <Hint>
+                  The extension picks the format: .zip, .tar.gz or .tar.
+                </Hint>
+              </label>
               <input
                 id="arcName"
                 autoFocus
@@ -375,10 +380,6 @@ export default function Files({ me }) {
                 value={archiving.name}
                 onChange={(e) => setArchiving({ name: e.target.value })}
               />
-              <div className="muted" style={{ fontSize: '.78rem' }}>
-                The extension picks the format: <code>.zip</code>,{' '}
-                <code>.tar.gz</code> or <code>.tar</code>.
-              </div>
             </div>
             <div>
               <button type="submit" className="primary">Compress</button>{' '}
@@ -571,8 +572,7 @@ export default function Files({ me }) {
             <input type="file" multiple ref={fileInput} style={{ width: 'auto' }} />{' '}
             <button type="submit">Upload here</button>
             <div className="muted" style={{ marginTop: '.4rem', fontSize: '.85rem' }}>
-              Up to {fmtBytes(limits.max_upload_bytes)} per file, or drop them on this box.
-              Larger files belong on SFTP.
+              Up to {fmtBytes(limits.max_upload_bytes)} per file.
             </div>
           </div>
         </form>
