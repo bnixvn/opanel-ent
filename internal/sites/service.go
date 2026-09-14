@@ -14,7 +14,9 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
@@ -322,6 +324,95 @@ func (s *Service) Update(ctx context.Context, id int64, req UpdateRequest) (*db.
 	return s.db.SiteByID(ctx, id)
 }
 
+// CertificateRequest asks for a certificate covering a site.
+type CertificateRequest struct {
+	SiteID int64
+	Email  string
+	// IncludeAliases puts the site's aliases on the certificate too. Off by
+	// default: one alias whose DNS does not point here fails the whole order,
+	// and losing the primary name to a stale alias is the worse outcome.
+	IncludeAliases bool
+	Staging        bool
+	ForceHTTPS     bool
+}
+
+// IssueCertificate obtains a certificate for a site and turns TLS on.
+func (s *Service) IssueCertificate(ctx context.Context, req CertificateRequest) (*db.Site, error) {
+	site, err := s.db.SiteByID(ctx, req.SiteID)
+	if err != nil {
+		return nil, err
+	}
+	domains := []string{site.Domain}
+	if req.IncludeAliases {
+		domains = append(domains, site.Aliases...)
+	}
+
+	cert, err := agentclient.Call[acme.Certificate](ctx, s.agent, "cert.issue", 1,
+		actions.CertIssueRequest{Domains: domains, Email: req.Email, Staging: req.Staging})
+	if err != nil {
+		return nil, err
+	}
+
+	site.CertFile = cert.CertFile
+	site.KeyFile = cert.KeyFile
+	site.CertExpires = cert.NotAfter
+	site.SSLEnabled = true
+	site.ForceHTTPS = req.ForceHTTPS
+	if err := s.db.UpdateSite(ctx, site); err != nil {
+		return nil, err
+	}
+	if err := s.SyncWebserver(ctx); err != nil {
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	return s.db.SiteByID(ctx, req.SiteID)
+}
+
+// DisableTLS turns HTTPS off for a site, leaving the certificate on disk so
+// turning it back on does not need a fresh order against the rate limit.
+func (s *Service) DisableTLS(ctx context.Context, siteID int64) (*db.Site, error) {
+	site, err := s.db.SiteByID(ctx, siteID)
+	if err != nil {
+		return nil, err
+	}
+	site.SSLEnabled = false
+	site.ForceHTTPS = false
+	if err := s.db.UpdateSite(ctx, site); err != nil {
+		return nil, err
+	}
+	if err := s.SyncWebserver(ctx); err != nil {
+		return nil, fmt.Errorf("apply webserver config: %w", err)
+	}
+	return s.db.SiteByID(ctx, siteID)
+}
+
+// RenewDueCertificates re-issues certificates close to expiry.
+//
+// Runs on a timer rather than on demand: a certificate that lapses takes the
+// site down for every visitor, and nobody notices a renewal that quietly
+// worked. One failure does not stop the sweep — the next site may well
+// succeed, and a single misconfigured domain should not hold up the rest.
+func (s *Service) RenewDueCertificates(ctx context.Context, email string) (renewed int, errs []error) {
+	due, err := s.db.SitesNeedingRenewal(ctx, time.Now().Add(acme.RenewBefore))
+	if err != nil {
+		return 0, []error{err}
+	}
+	for _, site := range due {
+		if _, err := s.IssueCertificate(ctx, CertificateRequest{
+			SiteID:     site.ID,
+			Email:      email,
+			ForceHTTPS: site.ForceHTTPS,
+		}); err != nil {
+			s.log.Error("sites: certificate renewal failed",
+				"domain", site.Domain, "expires", site.CertExpires, "err", err)
+			errs = append(errs, fmt.Errorf("%s: %w", site.Domain, err))
+			continue
+		}
+		s.log.Info("sites: certificate renewed", "domain", site.Domain)
+		renewed++
+	}
+	return renewed, errs
+}
+
 // SyncWebserver regenerates the whole webserver configuration from the
 // database. Every mutation ends here, which is what guarantees the rendered
 // configuration and the database never drift apart.
@@ -342,6 +433,9 @@ func (s *Service) SyncWebserver(ctx context.Context) error {
 			PHPVersion:   r.PHPVersion,
 			RewriteMode:  r.RewriteMode,
 			SSLEnabled:   r.SSLEnabled,
+			CertFile:     r.CertFile,
+			KeyFile:      r.KeyFile,
+			ForceHTTPS:   r.ForceHTTPS,
 			WAFEnabled:   r.WAFEnabled,
 			Suspended:    r.Suspended,
 		})

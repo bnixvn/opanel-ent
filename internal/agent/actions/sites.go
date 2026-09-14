@@ -142,6 +142,7 @@ type SiteSpec struct {
 	SSLEnabled   bool     `json:"ssl_enabled"`
 	CertFile     string   `json:"cert_file,omitempty"`
 	KeyFile      string   `json:"key_file,omitempty"`
+	ForceHTTPS   bool     `json:"force_https"`
 	WAFEnabled   bool     `json:"waf_enabled"`
 	Suspended    bool     `json:"suspended"`
 }
@@ -187,6 +188,7 @@ func resolve(p phpmgr.Provider, specs []SiteSpec) ([]webserver.Site, error) {
 			SSLEnabled:   sp.SSLEnabled,
 			CertFile:     sp.CertFile,
 			KeyFile:      sp.KeyFile,
+			ForceHTTPS:   sp.ForceHTTPS,
 			WAFEnabled:   sp.WAFEnabled,
 			Suspended:    sp.Suspended,
 		}

@@ -95,6 +95,10 @@ type Site struct {
 	SSLEnabled bool
 	CertFile   string
 	KeyFile    string
+	// ForceHTTPS redirects plain HTTP to TLS. Per-site rather than global: a
+	// site behind a CDN that terminates TLS elsewhere must not be forced into
+	// a redirect loop.
+	ForceHTTPS bool
 
 	WAFEnabled bool
 	Suspended  bool

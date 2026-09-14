@@ -25,6 +25,8 @@ type siteView struct {
 	DocumentRoot string    `json:"document_root"`
 	RewriteMode  string    `json:"rewrite_mode"`
 	SSLEnabled   bool      `json:"ssl_enabled"`
+	ForceHTTPS   bool      `json:"force_https"`
+	CertExpires  string    `json:"cert_expires,omitempty"`
 	WAFEnabled   bool      `json:"waf_enabled"`
 	Suspended    bool      `json:"suspended"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -40,9 +42,18 @@ func viewSite(s *db.Site) siteView {
 		Owner: s.OwnerUsername, OwnerID: s.OwnerID,
 		AppType: s.AppType, PHPVersion: s.PHPVersion,
 		DocumentRoot: s.DocumentRoot, RewriteMode: s.RewriteMode,
-		SSLEnabled: s.SSLEnabled, WAFEnabled: s.WAFEnabled,
+		SSLEnabled: s.SSLEnabled, ForceHTTPS: s.ForceHTTPS,
+		CertExpires: certExpiresText(s), WAFEnabled: s.WAFEnabled,
 		Suspended: s.Suspended, CreatedAt: s.CreatedAt,
 	}
+}
+
+// certExpiresText renders the expiry for display, empty when there is none.
+func certExpiresText(s *db.Site) string {
+	if s.CertExpires.IsZero() {
+		return ""
+	}
+	return s.CertExpires.Format(time.RFC3339)
 }
 
 func (s *Server) handleSiteList(w http.ResponseWriter, r *http.Request) {
@@ -217,4 +228,58 @@ func (s *Server) siteError(w http.ResponseWriter, err error) {
 		// field that is wrong.
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 	}
+}
+
+type certRequest struct {
+	Email          string `json:"email,omitempty"`
+	IncludeAliases bool   `json:"include_aliases,omitempty"`
+	ForceHTTPS     bool   `json:"force_https,omitempty"`
+	Staging        bool   `json:"staging,omitempty"`
+}
+
+// handleSiteCertificate obtains a Let's Encrypt certificate for a site.
+//
+// The request can take a while: the CA has to fetch the challenge over the
+// public internet, and a domain whose DNS is wrong fails only after a
+// timeout. The client is expected to wait rather than poll, because a
+// half-finished order is not something the panel can resume.
+func (s *Server) handleSiteCertificate(w http.ResponseWriter, r *http.Request) {
+	site := s.loadSite(w, r)
+	if site == nil {
+		return
+	}
+	var req certRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	updated, err := s.sites.IssueCertificate(r.Context(), sites.CertificateRequest{
+		SiteID:         site.ID,
+		Email:          req.Email,
+		IncludeAliases: req.IncludeAliases,
+		ForceHTTPS:     req.ForceHTTPS,
+		Staging:        req.Staging,
+	})
+	if err != nil {
+		s.audit(r, "site.certificate", site.Domain, false, err.Error())
+		s.siteError(w, err)
+		return
+	}
+	s.audit(r, "site.certificate", site.Domain, true,
+		"expires "+updated.CertExpires.Format(time.RFC3339))
+	writeJSON(w, http.StatusOK, viewSite(updated))
+}
+
+func (s *Server) handleSiteCertificateDelete(w http.ResponseWriter, r *http.Request) {
+	site := s.loadSite(w, r)
+	if site == nil {
+		return
+	}
+	updated, err := s.sites.DisableTLS(r.Context(), site.ID)
+	if err != nil {
+		s.audit(r, "site.certificate.disable", site.Domain, false, err.Error())
+		s.siteError(w, err)
+		return
+	}
+	s.audit(r, "site.certificate.disable", site.Domain, true, "")
+	writeJSON(w, http.StatusOK, viewSite(updated))
 }

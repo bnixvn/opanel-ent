@@ -21,6 +21,10 @@ type Site struct {
 	Aliases      []string
 	RewriteMode  string
 	SSLEnabled   bool
+	CertFile     string
+	KeyFile      string
+	CertExpires  time.Time
+	ForceHTTPS   bool
 	WAFEnabled   bool
 	Suspended    bool
 	CreatedAt    time.Time
@@ -31,14 +35,16 @@ type Site struct {
 }
 
 const siteCols = `s.id, s.domain, s.owner_id, s.app_type, s.php_version, s.document_root,
-	s.aliases, s.rewrite_mode, s.ssl_enabled, s.waf_enabled, s.suspended,
+	s.aliases, s.rewrite_mode, s.ssl_enabled, s.cert_file, s.key_file,
+	s.cert_expires_at, s.force_https, s.waf_enabled, s.suspended,
 	s.created_at, s.updated_at, u.username`
 
 func scanSite(row interface{ Scan(...any) error }) (*Site, error) {
 	var s Site
-	var aliases, created, updated string
+	var aliases, created, updated, certExpires string
 	err := row.Scan(&s.ID, &s.Domain, &s.OwnerID, &s.AppType, &s.PHPVersion, &s.DocumentRoot,
-		&aliases, &s.RewriteMode, &s.SSLEnabled, &s.WAFEnabled, &s.Suspended,
+		&aliases, &s.RewriteMode, &s.SSLEnabled, &s.CertFile, &s.KeyFile,
+		&certExpires, &s.ForceHTTPS, &s.WAFEnabled, &s.Suspended,
 		&created, &updated, &s.OwnerUsername)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -52,6 +58,13 @@ func scanSite(row interface{ Scan(...any) error }) (*Site, error) {
 	}
 	if s.UpdatedAt, err = parseTime(updated); err != nil {
 		return nil, fmt.Errorf("db: site %d updated_at: %w", s.ID, err)
+	}
+	// Empty until a certificate is issued, which is the normal state for a
+	// freshly created site.
+	if certExpires != "" {
+		if s.CertExpires, err = parseTime(certExpires); err != nil {
+			return nil, fmt.Errorf("db: site %d cert_expires_at: %w", s.ID, err)
+		}
 	}
 	return &s, nil
 }
@@ -120,11 +133,45 @@ func (d *DB) ListSites(ctx context.Context, ownerID int64) ([]*Site, error) {
 func (d *DB) UpdateSite(ctx context.Context, s *Site) error {
 	_, err := d.ExecContext(ctx,
 		`UPDATE sites SET app_type = ?, php_version = ?, document_root = ?, aliases = ?,
-			rewrite_mode = ?, ssl_enabled = ?, waf_enabled = ?, suspended = ?, updated_at = ?
+			rewrite_mode = ?, ssl_enabled = ?, cert_file = ?, key_file = ?,
+			cert_expires_at = ?, force_https = ?, waf_enabled = ?, suspended = ?, updated_at = ?
 		 WHERE id = ?`,
 		s.AppType, s.PHPVersion, s.DocumentRoot, strings.Join(s.Aliases, " "),
-		s.RewriteMode, s.SSLEnabled, s.WAFEnabled, s.Suspended, fmtTime(time.Now()), s.ID)
+		s.RewriteMode, s.SSLEnabled, s.CertFile, s.KeyFile,
+		certExpiryValue(s.CertExpires), s.ForceHTTPS,
+		s.WAFEnabled, s.Suspended, fmtTime(time.Now()), s.ID)
 	return err
+}
+
+// certExpiryValue renders a zero time as the empty string, so "no certificate"
+// and "expires at the zero instant" cannot be confused.
+func certExpiryValue(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return fmtTime(t)
+}
+
+// SitesNeedingRenewal returns SSL sites whose certificate expires before the
+// given moment, which is what the renewal sweep works from.
+func (d *DB) SitesNeedingRenewal(ctx context.Context, before time.Time) ([]*Site, error) {
+	rows, err := d.QueryContext(ctx,
+		`SELECT `+siteCols+siteJoin+
+			` WHERE s.ssl_enabled = 1 AND s.cert_expires_at <> '' AND s.cert_expires_at < ?
+			  ORDER BY s.cert_expires_at`, fmtTime(before))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Site
+	for rows.Next() {
+		x, err := scanSite(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
 }
 
 // DeleteSite removes a site row. Files and webserver config are the caller's

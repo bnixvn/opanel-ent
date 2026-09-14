@@ -99,7 +99,17 @@ context / {
     addDefaultCharset         off
 }
 {{- end }}
-
+{{ if and .Site.ForceHTTPS .Site.SSLEnabled }}
+# Plain HTTP is redirected, except the challenge path below: a renewal that
+# 301s to HTTPS cannot be validated when the certificate it is renewing has
+# already expired.
+rewrite {
+    enable                    1
+    RewriteCond %{HTTPS} !on
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^(.*)$ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
+}
+{{ end }}
 # Certificate renewals must keep working while the site is live, and while it
 # is suspended: a suspension is not a reason to let the certificate lapse.
 context /.well-known/acme-challenge {

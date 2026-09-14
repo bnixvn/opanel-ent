@@ -141,7 +141,7 @@
       <div class="card">
         <h2>Sites</h2>
         <div class="scroll"><table id="sitesTable">
-          <thead><tr><th>Domain</th><th>Owner</th><th>Type</th><th>PHP</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Domain</th><th>Owner</th><th>Type</th><th>PHP</th><th>SSL</th><th>Status</th><th></th></tr></thead>
           <tbody></tbody>
         </table></div>
         <div class="empty hidden" id="sitesEmpty">No sites yet.</div>
@@ -388,6 +388,24 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
 
 /* ---------- sites ---------- */
 
+// sslCell shows the certificate state and the action that changes it.
+function sslCell(s) {
+  if (!s.ssl_enabled) {
+    return `<button class="act" data-ssl="${s.id}" data-domain="${esc(s.domain)}">Enable SSL</button>`;
+  }
+  const days = s.cert_expires
+    ? Math.round((new Date(s.cert_expires) - Date.now()) / 86400000)
+    : null;
+  const state = days === null ? tag("on", "ok")
+    : days < 0 ? tag("expired", "bad")
+    : days < 15 ? tag(`${days}d left`, "warn")
+    : tag(`${days}d left`, "ok");
+  return state +
+    (s.force_https ? ' <span class="tag mute">forced</span>' : "") +
+    `<br><a href="#" data-ssloff="${s.id}" data-domain="${esc(s.domain)}" ` +
+    `style="font-size:.8em">turn off</a>`;
+}
+
 async function loadSites() {
   const { sites } = await api("/sites");
   const tb = $("#sitesTable tbody");
@@ -408,6 +426,7 @@ async function loadSites() {
       `<td>${esc(s.owner)}</td>` +
       `<td>${esc(s.app_type)}</td>` +
       `<td>${phpCell}</td>` +
+      `<td>${sslCell(s)}</td>` +
       `<td>${s.suspended ? tag("suspended", "warn") : tag("active", "ok")}</td>` +
       `<td style="text-align:right;white-space:nowrap">` +
         `<button class="act" data-suspend="${s.id}" data-to="${s.suspended ? 0 : 1}">` +
@@ -422,6 +441,31 @@ async function loadSites() {
       method: "PATCH", body: JSON.stringify({ php_version: sel.value }),
     }), `PHP set to ${sel.value}`);
   }));
+  $$("[data-ssl]", tb).forEach(b => b.addEventListener("click", async () => {
+    const force = confirm(
+      `Get a Let's Encrypt certificate for ${b.dataset.domain}?\n\n` +
+      `The domain must already point at this server — the certificate authority ` +
+      `fetches a file over plain HTTP to check.\n\n` +
+      `OK also redirects HTTP to HTTPS. Cancel this box to issue without the redirect.`);
+    note("#msg", `Requesting a certificate for ${b.dataset.domain}. This can take up to a minute.`, "ok");
+    b.disabled = true;
+    try {
+      await api(`/sites/${b.dataset.ssl}/certificate`, {
+        method: "POST", body: JSON.stringify({ force_https: force }),
+      });
+      note("#msg", `HTTPS is on for ${b.dataset.domain}`, "ok");
+    } catch (err) { note("#msg", err.message); }
+    b.disabled = false;
+    await loadSites();
+  }));
+
+  $$("[data-ssloff]", tb).forEach(a => a.addEventListener("click", e => {
+    e.preventDefault();
+    if (!confirm(`Turn HTTPS off for ${a.dataset.domain}?\n\n` +
+      `The certificate stays on disk, so turning it back on does not need a new one.`)) return;
+    guard(() => api(`/sites/${a.dataset.ssloff}/certificate`, { method: "DELETE" }), "HTTPS turned off");
+  }));
+
   $$("[data-suspend]", tb).forEach(b => b.addEventListener("click", () =>
     guard(() => api("/sites/" + b.dataset.suspend, {
       method: "PATCH", body: JSON.stringify({ suspended: b.dataset.to === "1" }),

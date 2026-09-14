@@ -87,6 +87,8 @@ func (s *Server) routes() http.Handler {
 			pr.Get("/sites/{id}", s.handleSiteGet)
 			pr.Patch("/sites/{id}", s.handleSiteUpdate)
 			pr.Delete("/sites/{id}", s.handleSiteDelete)
+			pr.Post("/sites/{id}/certificate", s.handleSiteCertificate)
+			pr.Delete("/sites/{id}/certificate", s.handleSiteCertificateDelete)
 
 			// Choosing a PHP version needs the list, so any authenticated
 			// user may read it; changing what is installed does not.
@@ -176,21 +178,50 @@ func (s *Server) HTTPServer() *http.Server {
 
 // StartBackgroundTasks runs periodic housekeeping until ctx is cancelled.
 func (s *Server) StartBackgroundTasks(ctx context.Context) {
-	go func() {
-		t := time.NewTicker(15 * time.Minute)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				n, err := s.auth.PurgeExpiredSessions(ctx)
-				if err != nil {
-					s.log.Warn("httpapi: purge sessions", "err", err)
-				} else if n > 0 {
-					s.log.Debug("httpapi: purged expired sessions", "count", n)
-				}
+	go s.purgeSessionsLoop(ctx)
+	go s.renewCertificatesLoop(ctx)
+}
+
+func (s *Server) purgeSessionsLoop(ctx context.Context) {
+	t := time.NewTicker(15 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			n, err := s.auth.PurgeExpiredSessions(ctx)
+			if err != nil {
+				s.log.Warn("httpapi: purge sessions", "err", err)
+			} else if n > 0 {
+				s.log.Debug("httpapi: purged expired sessions", "count", n)
 			}
 		}
-	}()
+	}
+}
+
+// renewCertificatesLoop re-issues certificates before they lapse.
+//
+// Twice a day, with the first sweep a minute after start. Certificates are
+// renewed 30 days ahead, so this has sixty chances to succeed before anything
+// is visible to a visitor — which matters because the failure mode of a
+// missed renewal is every browser refusing the site at once.
+func (s *Server) renewCertificatesLoop(ctx context.Context) {
+	timer := time.NewTimer(time.Minute)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		renewed, errs := s.sites.RenewDueCertificates(ctx, s.cfg.ACMEEmail)
+		if renewed > 0 {
+			s.log.Info("httpapi: renewed certificates", "count", renewed)
+		}
+		for _, err := range errs {
+			s.log.Error("httpapi: certificate renewal", "err", err)
+		}
+		timer.Reset(12 * time.Hour)
+	}
 }

@@ -48,6 +48,11 @@ type Config struct {
 	// autodetect (altphp when CloudLinux is present).
 	PHPProvider string
 
+	// ACMEEmail is the contact on the Let's Encrypt account. Optional, but
+	// without it the CA cannot warn you that a certificate is about to
+	// expire — the last line of defence when automated renewal breaks.
+	ACMEEmail string
+
 	LogLevel string // debug|info|warn|error
 }
 
@@ -74,6 +79,7 @@ func Load() (*Config, error) {
 		PanelHost:        env("OPANEL_PANEL_HOST", ""),
 		WebserverBackend: env("OPANEL_WEBSERVER_BACKEND", BackendOLS),
 		PHPProvider:      env("OPANEL_PHP_PROVIDER", ""),
+		ACMEEmail:        env("OPANEL_ACME_EMAIL", ""),
 		LogLevel:         env("OPANEL_LOG_LEVEL", "info"),
 	}
 	c.DBPath = env("OPANEL_DB_PATH", filepath.Join(c.DataDir, "opanel.db"))
