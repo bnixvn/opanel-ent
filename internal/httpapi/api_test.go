@@ -18,6 +18,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/httpapi"
+	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
@@ -57,7 +58,8 @@ func newFixture(t *testing.T) *fixture {
 
 	siteSvc := sites.New(database, ac, webserver.DefaultServerConfig(), discardLogger())
 	dbSvc := databases.New(database, ac, discardLogger())
-	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, discardLogger())
+	userSvc := panelusers.New(database, ac, discardLogger())
+	api := httpapi.New(cfg, database, authSvc, ac, siteSvc, dbSvc, userSvc, discardLogger())
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
 

@@ -12,6 +12,9 @@ const (
 	RoleEndUser  Role = "end_user"
 )
 
+// AllRoles lists every role, broadest first, for pickers in the interface.
+var AllRoles = []Role{RoleAdmin, RoleReseller, RoleEndUser}
+
 // Valid reports whether r is a role the panel knows.
 func (r Role) Valid() bool {
 	switch r {

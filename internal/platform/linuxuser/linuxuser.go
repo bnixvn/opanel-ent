@@ -166,13 +166,27 @@ func Delete(ctx context.Context, username string, removeHome bool) error {
 	if acct == nil {
 		return nil
 	}
-	argv := []string{"userdel"}
-	if removeHome {
-		argv = append(argv, "--remove")
-	}
-	argv = append(argv, username)
-	if _, err := run.Cmd(ctx, argv, run.Timeout(120*time.Second)); err != nil {
+	// Not "userdel --remove": the home is owned by root so that sshd will
+	// accept it as a chroot target, and userdel refuses to delete a home
+	// directory the account does not own. It removes the account, reports an
+	// error, and leaves every file behind — which reads as a failed delete
+	// when the account is in fact already gone.
+	if _, err := run.Cmd(ctx, []string{"userdel", username}, run.Timeout(120*time.Second)); err != nil {
 		return fmt.Errorf("linuxuser: delete %q: %w", username, err)
+	}
+	if !removeHome {
+		return nil
+	}
+
+	// Containment check before a recursive delete running as root. acct.Home
+	// comes from the passwd entry, so a hand-edited entry is the threat here,
+	// not the caller.
+	home := acct.Home
+	if home == "" || home != path.Clean(home) || path.Dir(home) != HomeBase || path.Base(home) != username {
+		return fmt.Errorf("linuxuser: refusing to remove %q: not %s/%s", home, HomeBase, username)
+	}
+	if err := os.RemoveAll(home); err != nil {
+		return fmt.Errorf("linuxuser: remove home %q: %w", home, err)
 	}
 	return nil
 }

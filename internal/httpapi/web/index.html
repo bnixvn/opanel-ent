@@ -106,7 +106,9 @@
       <button data-tab="sites" aria-current="page">Sites</button>
       <button data-tab="databases">Databases</button>
       <button data-tab="php">PHP</button>
+      <button data-tab="users" data-staff>Users</button>
       <button data-tab="system">System</button>
+      <button data-tab="account">Account</button>
     </nav>
     <span class="who" id="who"></span>
     <button class="act" id="logout">Sign out</button>
@@ -201,6 +203,52 @@
           <thead><tr><th>Version</th><th>Status</th><th>Interpreter</th><th></th></tr></thead>
           <tbody></tbody>
         </table></div>
+      </div>
+    </section>
+
+    <section data-panel="users" class="hidden">
+      <div class="card">
+        <h2>New user</h2>
+        <form id="newUser" class="row">
+          <div class="field"><label for="nuUsername">Username</label>
+            <input id="nuUsername" placeholder="alice" required style="width:100%"></div>
+          <div class="field"><label for="nuEmail">Email</label>
+            <input id="nuEmail" type="email" placeholder="optional" style="width:100%"></div>
+          <div class="field"><label for="nuRole">Role</label>
+            <select id="nuRole" style="width:100%"></select></div>
+          <div><button class="act primary" type="submit">Create user</button></div>
+        </form>
+        <p class="muted" style="margin:.6rem 0 0;font-size:.83rem">
+          An end user also gets a Linux account of the same name for SFTP, and
+          their sites&#39; PHP runs as it. Passwords are generated and shown once.</p>
+      </div>
+
+      <div class="card">
+        <h2>Users</h2>
+        <div class="scroll"><table id="userTable">
+          <thead><tr><th>User</th><th>Role</th><th>Owns</th><th>2FA</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section data-panel="account" class="hidden">
+      <div class="card">
+        <h2>Change your password</h2>
+        <form id="pwForm" class="row">
+          <div class="field"><label for="pwCur">Current password</label>
+            <input id="pwCur" type="password" autocomplete="current-password" required style="width:100%"></div>
+          <div class="field"><label for="pwNew">New password</label>
+            <input id="pwNew" type="password" autocomplete="new-password" required minlength="10" style="width:100%"></div>
+          <div><button class="act primary" type="submit">Change</button></div>
+        </form>
+        <p class="muted" style="margin:.6rem 0 0;font-size:.83rem">
+          Changing it signs out every session, including this one.</p>
+      </div>
+
+      <div class="card">
+        <h2>Two-factor authentication</h2>
+        <div id="twofa"></div>
       </div>
     </section>
 
@@ -302,6 +350,8 @@ $$("nav button").forEach(b => b.addEventListener("click", () => {
   $$("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   if (b.dataset.tab === "system") loadSystem();
   if (b.dataset.tab === "databases") loadDatabases();
+  if (b.dataset.tab === "users") loadUsers();
+  if (b.dataset.tab === "account") loadAccount();
 }));
 
 /* ---------- sites ---------- */
@@ -573,6 +623,197 @@ async function phpAction(btn, path, method, busy) {
   await loadSites();
 }
 
+/* ---------- users ---------- */
+
+let rolesCache = ["admin", "reseller", "end_user"];
+const roleLabel = r => ({ admin: "Admin", reseller: "Reseller", end_user: "End user" }[r] || r);
+
+async function loadUsers() {
+  let data;
+  try { data = await api("/users"); }
+  catch (err) { note("#msg", err.message); return; }
+  rolesCache = data.roles;
+  $("#nuRole").innerHTML = rolesCache
+    .map(r => `<option value="${r}"${r === "end_user" ? " selected" : ""}>${roleLabel(r)}</option>`).join("");
+
+  const tb = $("#userTable tbody");
+  tb.innerHTML = "";
+  for (const u of data.users) {
+    const isSelf = u.id === me.id;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><strong>${esc(u.username)}</strong>${isSelf ? ' <span class="tag mute">you</span>' : ""}` +
+        (u.email ? `<br><span class="muted" style="font-size:.85em">${esc(u.email)}</span>` : "") +
+        (u.linux_uid ? `<br><span class="muted" style="font-size:.8em">uid ${u.linux_uid}</span>` : "") + `</td>` +
+      `<td>${me.role === "admin" && !isSelf
+        ? `<select data-role="${u.id}">${rolesCache.map(r =>
+            `<option value="${r}"${r === u.role ? " selected" : ""}>${roleLabel(r)}</option>`).join("")}</select>`
+        : roleLabel(u.role)}</td>` +
+      `<td class="muted">${u.sites} site${u.sites === 1 ? "" : "s"}, ${u.databases} db</td>` +
+      `<td>${u.totp_enabled ? tag("on", "ok") : tag("off", "mute")}</td>` +
+      `<td>${u.suspended ? tag("suspended", "warn") : tag("active", "ok")}</td>` +
+      `<td style="text-align:right;white-space:nowrap">` +
+        `<button class="act" data-upw="${u.id}" data-name="${esc(u.username)}">Password</button> ` +
+        (u.linux_uid ? `<button class="act" data-usftp="${u.id}" data-name="${esc(u.username)}">SFTP</button> ` : "") +
+        (isSelf ? "" :
+          `<button class="act" data-ususp="${u.id}" data-to="${u.suspended ? 0 : 1}">` +
+            `${u.suspended ? "Restore" : "Suspend"}</button> ` +
+          `<button class="act danger" data-udel="${u.id}" data-name="${esc(u.username)}" ` +
+            `data-owns="${u.sites + u.databases}">Delete</button>`) +
+      `</td>`;
+    tb.appendChild(tr);
+  }
+
+  $$("[data-role]", tb).forEach(sel => sel.addEventListener("change", () =>
+    userGuard(() => api(`/users/${sel.dataset.role}`, {
+      method: "PATCH", body: JSON.stringify({ role: sel.value }),
+    }), `Role set to ${roleLabel(sel.value)}`)));
+
+  $$("[data-ususp]", tb).forEach(b => b.addEventListener("click", () =>
+    userGuard(() => api(`/users/${b.dataset.ususp}`, {
+      method: "PATCH", body: JSON.stringify({ suspended: b.dataset.to === "1" }),
+    }), b.dataset.to === "1" ? "User suspended" : "User restored")));
+
+  $$("[data-udel]", tb).forEach(b => b.addEventListener("click", () => {
+    if (Number(b.dataset.owns) > 0) {
+      note("#msg", `${b.dataset.name} still owns sites or databases. Remove those first.`);
+      return;
+    }
+    if (!confirm(`Delete ${b.dataset.name}?\n\nTheir home directory and files are deleted too and cannot be recovered.`)) return;
+    userGuard(() => api(`/users/${b.dataset.udel}?remove_files=true`, { method: "DELETE" }), "User deleted");
+  }));
+
+  $$("[data-upw]", tb).forEach(b => b.addEventListener("click", async () => {
+    if (!confirm(`Reset the panel password for ${b.dataset.name}?\n\nEvery session of theirs is signed out.`)) return;
+    note("#msg", "");
+    try {
+      const res = await api(`/users/${b.dataset.upw}/password`, { method: "POST", body: "{}" });
+      showSecret(`New panel password for ${b.dataset.name}`, res.password);
+    } catch (err) { note("#msg", err.message); }
+  }));
+
+  $$("[data-usftp]", tb).forEach(b => b.addEventListener("click", async () => {
+    note("#msg", "");
+    try {
+      const res = await api(`/users/${b.dataset.usftp}/sftp-password`, { method: "POST", body: "{}" });
+      showSecret(`New SFTP password for ${b.dataset.name}`, res.password);
+    } catch (err) { note("#msg", err.message); }
+  }));
+}
+
+async function userGuard(fn, okMsg) {
+  note("#msg", "");
+  try { await fn(); note("#msg", okMsg, "ok"); }
+  catch (err) { note("#msg", err.message); }
+  await loadUsers();
+}
+
+$("#newUser").addEventListener("submit", async e => {
+  e.preventDefault();
+  note("#msg", "");
+  try {
+    const res = await api("/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: $("#nuUsername").value.trim(),
+        email: $("#nuEmail").value.trim() || undefined,
+        role: $("#nuRole").value,
+      }),
+    });
+    $("#nuUsername").value = "";
+    $("#nuEmail").value = "";
+    await loadUsers();
+    await loadOwners();
+    let msg = `Panel password: ${res.password}`;
+    if (res.sftp_password) msg += `\nSFTP password: ${res.sftp_password}`;
+    showSecret(`Created ${res.user.username}`, msg);
+    return;
+  } catch (err) { note("#msg", err.message); }
+  await loadUsers();
+});
+
+/* ---------- account ---------- */
+
+async function loadAccount() {
+  const el = $("#twofa");
+  if (me.totp_enabled) {
+    el.innerHTML =
+      `<p>${tag("enabled", "ok")} Your account asks for a code from your authenticator at sign-in.</p>` +
+      `<form id="off2fa" class="row" style="margin-top:.6rem">` +
+        `<div class="field" style="max-width:16rem"><label for="off2faPw">Confirm with your password</label>` +
+          `<input id="off2faPw" type="password" autocomplete="current-password" required style="width:100%"></div>` +
+        `<div><button class="act danger" type="submit">Turn off</button></div>` +
+      `</form>`;
+    $("#off2fa").addEventListener("submit", async e => {
+      e.preventDefault();
+      note("#msg", "");
+      try {
+        await api("/auth/2fa/disable", {
+          method: "POST", body: JSON.stringify({ password: $("#off2faPw").value }),
+        });
+        me = await api("/auth/me");
+        note("#msg", "Two-factor turned off", "ok");
+      } catch (err) { note("#msg", err.message); }
+      loadAccount();
+    });
+    return;
+  }
+
+  el.innerHTML =
+    `<p>${tag("off", "mute")} Add a second factor with any authenticator app.</p>` +
+    `<p><button class="act primary" id="start2fa">Set up two-factor</button></p>`;
+
+  $("#start2fa").addEventListener("click", async () => {
+    note("#msg", "");
+    let setup;
+    try { setup = await api("/auth/2fa/setup", { method: "POST", body: "{}" }); }
+    catch (err) { note("#msg", err.message); return; }
+
+    el.innerHTML =
+      `<ol style="padding-left:1.2rem;margin:0 0 .8rem">` +
+        `<li>Add this secret to your authenticator:<br>` +
+          `<code id="tsec" style="user-select:all;font-size:1.05em"></code></li>` +
+        `<li style="margin-top:.5rem">Save these recovery codes somewhere safe. Each works once, ` +
+          `and they are the only way back in if you lose the device:<br>` +
+          `<code id="tcodes" style="user-select:all;display:inline-block;margin-top:.3rem"></code></li>` +
+        `<li style="margin-top:.5rem">Enter the current six-digit code to switch it on.</li>` +
+      `</ol>` +
+      `<form id="on2fa" class="row">` +
+        `<div class="field" style="max-width:12rem"><label for="on2faCode">Code</label>` +
+          `<input id="on2faCode" inputmode="numeric" autocomplete="one-time-code" required style="width:100%"></div>` +
+        `<div><button class="act primary" type="submit">Enable</button></div>` +
+      `</form>`;
+    $("#tsec").textContent = setup.secret;
+    $("#tcodes").textContent = setup.recovery_codes.join("  ");
+
+    $("#on2fa").addEventListener("submit", async e => {
+      e.preventDefault();
+      note("#msg", "");
+      try {
+        await api("/auth/2fa/enable", {
+          method: "POST", body: JSON.stringify({ code: $("#on2faCode").value.trim() }),
+        });
+        me = await api("/auth/me");
+        note("#msg", "Two-factor is on", "ok");
+        loadAccount();
+      } catch (err) { note("#msg", err.message); }
+    });
+  });
+}
+
+$("#pwForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  note("#msg", "");
+  try {
+    await api("/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ current: $("#pwCur").value, new: $("#pwNew").value }),
+    });
+    alert("Password changed. You will be signed out.");
+    location.reload();
+  } catch (err) { note("#msg", err.message); }
+});
+
 /* ---------- system ---------- */
 
 async function loadSystem() {
@@ -660,6 +901,11 @@ async function start() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#who").textContent = `${me.username} · ${me.role}`;
+  // An end user has no business seeing tabs whose every endpoint would
+  // refuse them; hiding is cosmetic, the API is what actually enforces it.
+  const staff = me.role === "admin" || me.role === "reseller";
+  $$("nav button[data-staff]").forEach(b => b.classList.toggle("hidden", !staff));
+  $$('nav button[data-tab="system"]').forEach(b => b.classList.toggle("hidden", me.role !== "admin"));
   await loadPHP();
   await loadOwners();
   await loadSites();

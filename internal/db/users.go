@@ -92,3 +92,67 @@ func (d *DB) SetTOTP(ctx context.Context, userID int64, secret string, enabled b
 		secret, enabled, fmtTime(time.Now()), userID)
 	return err
 }
+
+// ListUsers returns panel users ordered by id. When createdBy is non-zero the
+// listing is restricted to users a reseller provisioned.
+func (d *DB) ListUsers(ctx context.Context) ([]*User, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]*User, 0, 8)
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// UpdateUserProfile writes the fields an administrator may change.
+func (d *DB) UpdateUserProfile(ctx context.Context, id int64, email, role string) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE users SET email = ?, role = ?, updated_at = ? WHERE id = ?`,
+		email, role, fmtTime(time.Now()), id)
+	return err
+}
+
+// SetUserSuspended suspends or restores an account.
+func (d *DB) SetUserSuspended(ctx context.Context, id int64, suspended bool) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE users SET suspended = ?, updated_at = ? WHERE id = ?`,
+		suspended, fmtTime(time.Now()), id)
+	return err
+}
+
+// DeleteUser removes a panel user. The foreign keys on sites and databases
+// are ON DELETE RESTRICT, so this fails while the user still owns anything —
+// which is the behaviour we want: deleting an account must never silently
+// orphan a customer's data.
+func (d *DB) DeleteUser(ctx context.Context, id int64) error {
+	_, err := d.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	return err
+}
+
+// CountAdmins reports how many active administrators exist, so the last one
+// cannot be deleted or demoted.
+func (d *DB) CountAdmins(ctx context.Context, excludeID int64) (int, error) {
+	var n int
+	err := d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM users WHERE role = 'admin' AND suspended = 0 AND id <> ?`,
+		excludeID).Scan(&n)
+	return n, err
+}
+
+// UserResourceCounts reports what a user owns, for the delete confirmation.
+func (d *DB) UserResourceCounts(ctx context.Context, id int64) (sites, dbs int, err error) {
+	if err = d.QueryRowContext(ctx, `SELECT COUNT(*) FROM sites WHERE owner_id = ?`, id).Scan(&sites); err != nil {
+		return 0, 0, err
+	}
+	err = d.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_databases WHERE owner_id = ?`, id).Scan(&dbs)
+	return sites, dbs, err
+}

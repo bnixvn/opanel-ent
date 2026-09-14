@@ -14,6 +14,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/databases"
 	"github.com/bnixvn/opanel-ent/internal/db"
+	"github.com/bnixvn/opanel-ent/internal/panelusers"
 	"github.com/bnixvn/opanel-ent/internal/sites"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 	agent     *agentclient.Client
 	sites     *sites.Service
 	databases *databases.Service
+	users     *panelusers.Service
 	log       *slog.Logger
 
 	loginLimiter *limiter
@@ -32,7 +34,8 @@ type Server struct {
 }
 
 // New builds the API server and its route table.
-func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, log *slog.Logger) *Server {
+func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentclient.Client, siteSvc *sites.Service, dbSvc *databases.Service, userSvc *panelusers.Service,
+	log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -43,6 +46,7 @@ func New(cfg *config.Config, database *db.DB, authSvc *auth.Service, ac *agentcl
 		agent:     ac,
 		sites:     siteSvc,
 		databases: dbSvc,
+		users:     userSvc,
 		log:       log,
 		// Five password attempts per minute per IP. Enough that a person who
 		// mistypes is unaffected, low enough that online guessing is futile.
@@ -93,8 +97,26 @@ func (s *Server) routes() http.Handler {
 			pr.Delete("/database-users/{id}", s.handleDBUserDelete)
 			pr.Post("/database-users/{id}/password", s.handleDBUserPassword)
 
+			// Own account.
+			pr.Post("/auth/password", s.handleChangeOwnPassword)
+			pr.Post("/auth/2fa/setup", s.handleTOTPSetup)
+			pr.Post("/auth/2fa/enable", s.handleTOTPEnable)
+			pr.Post("/auth/2fa/disable", s.handleTOTPDisable)
+
 			pr.Get("/php/versions", s.handlePHPList)
 			pr.Get("/webserver/status", s.handleWebserverStatus)
+
+			// Panel users. A reseller may manage end users; the handlers
+			// refuse anything above that.
+			pr.Group(func(rr chi.Router) {
+				rr.Use(s.requireRole(auth.RoleReseller))
+				rr.Get("/users", s.handleUserList)
+				rr.Post("/users", s.handleUserCreate)
+				rr.Patch("/users/{id}", s.handleUserUpdate)
+				rr.Delete("/users/{id}", s.handleUserDelete)
+				rr.Post("/users/{id}/password", s.handleUserPassword)
+				rr.Post("/users/{id}/sftp-password", s.handleUserSFTPPassword)
+			})
 
 			pr.Group(func(ar chi.Router) {
 				ar.Use(s.requireRole(auth.RoleAdmin))
