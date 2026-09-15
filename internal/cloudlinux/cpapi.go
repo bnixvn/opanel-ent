@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -138,30 +139,61 @@ type panelInfoData struct {
 
 // panelInfo declares what this panel can actually drive.
 //
-// Honest rather than optimistic: a feature declared here is one CloudLinux
-// will offer an operator, and offering one the panel has not wired up
-// produces a button that does nothing. They get switched on as they are
-// built, which is what makes this list worth reading.
+// This list is not documentation: CloudLinux reads it and hides every feature
+// it does not find here. Declaring one the panel cannot drive produces a
+// button that does nothing; declaring none -- which this did at first --
+// produces a manager with its tabs switched off and no explanation, which is
+// how "the selector is not supported in this environment" turns out to be the
+// panel's own doing.
+//
+// So each is answered from the host rather than written down. A feature is
+// supported when the thing that implements it is installed.
 func (a *API) panelInfo() panelInfoData {
+	// PHP Selector needs both: alt-php to choose between, and CageFS, because
+	// the selector works by giving each account its own view of /usr/bin/php.
+	phpSelector := fileExists(cageFSCtl) && hasAltPHP()
+
 	return panelInfoData{
 		Name:         PanelName,
 		Version:      version.String(),
 		UserLoginURL: optional(a.PanelURL),
 		SupportedFeatures: map[string]bool{
-			"php_selector":    false,
+			"php_selector":    phpSelector,
+			"cagefs":          fileExists(cageFSCtl),
+			"mod_lsapi":       fileExists(modLSAPI),
+			"reseller_limits": true,
+			// Not wired up yet, and saying so is the point of the list.
 			"ruby_selector":   false,
 			"python_selector": false,
 			"nodejs_selector": false,
-			"mod_lsapi":       false,
 			"mysql_governor":  false,
-			"cagefs":          false,
-			"reseller_limits": false,
 			"xray":            false,
 			"accelerate_wp":   false,
 			"wizard":          false,
 			"autotracing":     false,
 		},
 	}
+}
+
+// Where the things those features need live.
+const (
+	cageFSCtl = "/usr/sbin/cagefsctl"
+	modLSAPI  = "/etc/httpd/conf.d/lsapi.conf"
+	altPHPDir = "/opt/alt"
+)
+
+// hasAltPHP reports whether any alt-php version is installed.
+func hasAltPHP() bool {
+	entries, err := os.ReadDir(altPHPDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "php") {
+			return true
+		}
+	}
+	return false
 }
 
 // --- users ----------------------------------------------------------------
@@ -171,12 +203,18 @@ type userPackage struct {
 	Owner string `json:"owner"`
 }
 
+// Every field is sent every time, including the ones the schema does not
+// require. CloudLinux's own code reads user.package without checking, and its
+// model raises "package is not set, but used in code" for a field that was
+// merely absent -- which surfaced as a traceback from lvectl when setting
+// limits for an account that had no package. Absent and null are different
+// things to it, so nothing here is omitted.
 type userData struct {
 	ID       int64        `json:"id"`
 	Username string       `json:"username"`
 	Owner    string       `json:"owner"`
-	Domain   string       `json:"domain,omitempty"`
-	Package  *userPackage `json:"package,omitempty"`
+	Domain   string       `json:"domain"`
+	Package  *userPackage `json:"package"`
 	Email    *string      `json:"email"`
 	Locale   *string      `json:"locale_code"`
 }
