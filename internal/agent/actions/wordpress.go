@@ -216,7 +216,7 @@ func installWordPress(ctx context.Context, deps Deps, in WPInstallRequest) (WPIn
 		return WPInstallResult{}, errors.New("this site already has WordPress in it")
 	}
 
-	php := deps.PHP.CLIBinary(in.PHPVersion)
+	php := deps.PHP().CLIBinary(in.PHPVersion)
 	if !fileExists(php) {
 		return WPInstallResult{}, fmt.Errorf("PHP %s is not installed on this server", in.PHPVersion)
 	}

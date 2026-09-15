@@ -107,6 +107,16 @@ const PATHS = {
       <path d="M15 7l5 5-5 5" />
     </>
   ),
+  webserver: (
+    <>
+      <rect x="3" y="4" width="18" height="6" rx="1.5" />
+      <rect x="3" y="14" width="18" height="6" rx="1.5" />
+      <path d="M6.5 7h.01" />
+      <path d="M6.5 17h.01" />
+      <path d="M10 7h7" />
+      <path d="M10 17h7" />
+    </>
+  ),
   system: (
     <>
       <rect x="4.5" y="4.5" width="15" height="15" rx="2" />

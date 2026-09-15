@@ -37,7 +37,7 @@ type LSPHP struct{ root string }
 func NewLSPHP() *LSPHP { return &LSPHP{root: LSPHPRoot} }
 
 // Name identifies the provider.
-func (p *LSPHP) Name() string { return "lsphp" }
+func (p *LSPHP) Name() string { return ProviderLSPHP }
 
 // Supported lists the versions available for el10.
 func (p *LSPHP) Supported() []string { return append([]string(nil), lsphpVersions...) }

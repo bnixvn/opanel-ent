@@ -18,11 +18,19 @@ import (
 
 // Deps are the pluggable pieces the agent works through. Injecting them
 // rather than constructing them here is what lets the same action set drive
-// OpenLiteSpeed today and LiteSpeed Enterprise later, and lsphp today and
-// CloudLinux alt-php later, with no change to any handler.
+// Apache, LiteSpeed Enterprise and OpenLiteSpeed, and PHP-FPM or lsphp, with
+// no change to any handler.
+//
+// They are functions rather than values because the panel can switch
+// webserver while the agent is running. An agent that resolved its backend
+// once at startup would keep writing the previous server's configuration
+// until somebody restarted it -- and the moment a switch happens is exactly
+// when nobody wants to be told to restart the thing doing the switching.
 type Deps struct {
-	Webserver webserver.Backend
-	PHP       phpmgr.Provider
+	// Backend returns the webserver the host is currently set to run.
+	Backend func() (webserver.Backend, error)
+	// PHP returns the provider that goes with that webserver.
+	PHP func() phpmgr.Provider
 }
 
 // RegisterAll wires every action into r.
@@ -32,6 +40,8 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerSystemd(r)
 	registerPackages(r)
 	registerSites(r, deps)
+	registerWebserver(r, deps)
+	registerLSWS(r)
 	registerPHPIni(r, deps)
 	registerDatabases(r)
 	registerQuota(r)
@@ -83,11 +93,13 @@ func registerCore(r *agent.Registry, deps Deps) {
 
 	agent.Register(r, "sysinfo", 1, func(ctx context.Context, _ struct{}) (SysInfoResult, error) {
 		out := SysInfoResult{Distro: distro.Detect(ctx), Uptime: hostUptime()}
-		if deps.Webserver != nil {
-			out.Webserver = deps.Webserver.Name()
+		if deps.Backend != nil {
+			if ws, err := deps.Backend(); err == nil {
+				out.Webserver = ws.Name()
+			}
 		}
 		if deps.PHP != nil {
-			out.PHPProvider = deps.PHP.Name()
+			out.PHPProvider = deps.PHP().Name()
 		}
 		return out, nil
 	})

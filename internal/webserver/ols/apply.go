@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 )
 
@@ -26,10 +27,7 @@ func (b *Backend) Apply(ctx context.Context, r webserver.Rendered) error {
 		return err
 	}
 
-	if err := ensureSuspendedPage(); err != nil {
-		return err
-	}
-	if err := ensureACMEWebroot(); err != nil {
+	if err := webserver.EnsureSharedRoots(); err != nil {
 		return err
 	}
 
@@ -68,61 +66,6 @@ func (b *Backend) rollback(ctx context.Context, uid, gid int) error {
 	}
 	if err := b.Reload(ctx); err != nil {
 		return fmt.Errorf("ols: reload after rollback failed: %w", err)
-	}
-	return nil
-}
-
-// ensureSuspendedPage creates the shared notice a suspended site serves.
-// Written on every apply so a deleted or edited page comes back.
-func ensureSuspendedPage() error {
-	if err := os.MkdirAll(webserver.SuspendedRoot, 0o755); err != nil {
-		return fmt.Errorf("ols: create suspended page directory: %w", err)
-	}
-	if err := os.Chmod(webserver.SuspendedRoot, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(webserver.SuspendedRoot, "index.html"), suspendedPage, 0o644)
-}
-
-var suspendedPage = []byte(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Account suspended</title>
-<style>
-  body{font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-       margin:0;min-height:100vh;display:grid;place-items:center;
-       background:#fafafa;color:#1a1a1a}
-  main{max-width:32rem;padding:2rem;text-align:center}
-  h1{font-size:1.35rem;margin:0 0 .5rem;font-weight:600}
-  p{margin:0;color:#666}
-</style>
-</head>
-<body>
-<main>
-  <h1>This site is temporarily unavailable</h1>
-  <p>The account has been suspended. Please contact the hosting provider.</p>
-</main>
-</body>
-</html>
-`)
-
-// ensureACMEWebroot creates the shared challenge directory.
-//
-// It is written by the panel and read by the webserver worker, which runs as a
-// different account, so it is world-readable. The only thing that ever lands
-// here is a challenge token, which is public by design.
-func ensureACMEWebroot() error {
-	dir := filepath.Join(webserver.ACMEWebroot, ".well-known", "acme-challenge")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("ols: create ACME webroot: %w", err)
-	}
-	for _, p := range []string{webserver.ACMEWebroot,
-		filepath.Join(webserver.ACMEWebroot, ".well-known"), dir} {
-		if err := os.Chmod(p, 0o755); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -256,12 +199,27 @@ func errorLines(out string) string {
 	return b.String()
 }
 
-// Reload applies configuration gracefully. OpenLiteSpeed's "restart" is a
-// zero-downtime reload: workers finish their in-flight requests while new
-// ones start on the new configuration.
+// Reload applies configuration through systemd.
+//
+// Not through lswsctrl, which is what this used to do and what the vendor's
+// documentation suggests. lswsctrl forks a daemon that inherits the pipes it
+// was started with, so the call never returns: the panel waits for output
+// from a process that has detached and will not write any, until something
+// times it out. Worse, a server started that way is invisible to systemd --
+// `systemctl is-active lshttpd` says inactive while OpenLiteSpeed is serving
+// on port 80, and every other part of the panel believes systemd.
+//
+// The unit is the answer to both. Reload-or-restart lets systemd pick: a
+// graceful reload where the unit defines one, a restart where it does not.
 func (b *Backend) Reload(ctx context.Context) error {
-	_, err := run.Cmd(ctx, []string{binLSWSCtrl, "restart"}, run.Timeout(90*time.Second))
-	if err != nil {
+	st, err := svc.Get(ctx, unitName)
+	if err == nil && !st.Running() {
+		// The first apply of a fresh install, or the far side of a switch.
+		// Reloading something that is not running is an error on some
+		// systemd versions and a silent no-op on others.
+		return svc.Start(ctx, unitName)
+	}
+	if err := svc.ReloadOrRestart(ctx, unitName); err != nil {
 		return fmt.Errorf("ols: reload: %w", err)
 	}
 	return nil

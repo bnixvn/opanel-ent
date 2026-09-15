@@ -35,8 +35,11 @@ const (
 	ManagedDir = ConfDir + "/opanel"
 	VhostsDir  = ManagedDir + "/vhosts"
 
-	binOLS      = ServerRoot + "/bin/openlitespeed"
-	binLSWSCtrl = ServerRoot + "/bin/lswsctrl"
+	binOLS = ServerRoot + "/bin/openlitespeed"
+
+	// unitName is how the server is started and stopped. The package also
+	// installs lsws.service and openlitespeed.service as aliases of it.
+	unitName = "lshttpd"
 
 	// ConfOwner is the account OpenLiteSpeed reads its configuration as.
 	// Files written by the agent must end up owned by it or the server will
@@ -80,9 +83,8 @@ func New() (*Backend, error) {
 // Name identifies the backend.
 func (b *Backend) Name() string { return webserver.BackendOLS }
 
-// ServiceUnit is the systemd unit that runs OpenLiteSpeed. The package also
-// installs lsws.service and openlitespeed.service as aliases of this one.
-func (b *Backend) ServiceUnit() string { return "lshttpd" }
+// ServiceUnit is the systemd unit that runs OpenLiteSpeed.
+func (b *Backend) ServiceUnit() string { return unitName }
 
 // Installed reports whether OpenLiteSpeed is present.
 func (b *Backend) Installed() bool {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/phpfpm"
 	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
@@ -242,7 +243,15 @@ func resolve(p phpmgr.Provider, specs []SiteSpec) ([]webserver.Site, error) {
 			s.PHPSettings = checked
 		}
 		if s.NeedsPHP() {
-			s.LSAPIBinary = p.LSAPIBinary(sp.PHPVersion)
+			// Which of the two the site carries is decided by the provider,
+			// not by the caller: LiteSpeed spawns an interpreter and Apache
+			// proxies to a pool, and a site carrying the wrong one renders
+			// into a configuration that serves nothing.
+			if fp, ok := p.(phpmgr.FPMProvider); ok {
+				s.FPMSocket = fp.SocketPath(sp.PHPVersion, sp.Domain)
+			} else {
+				s.LSAPIBinary = p.LSAPIBinary(sp.PHPVersion)
+			}
 		}
 		if err := s.Validate(); err != nil {
 			return nil, fmt.Errorf("site %q: %w", sp.Domain, err)
@@ -363,7 +372,12 @@ func registerSites(r *agent.Registry, deps Deps) {
 	})
 
 	agent.Register(r, "webserver.apply", 1, func(ctx context.Context, in WebserverApplyRequest) (struct{}, error) {
-		sites, err := resolve(deps.PHP, in.Sites)
+		ws, err := deps.Backend()
+		if err != nil {
+			return struct{}{}, err
+		}
+		provider := deps.PHP()
+		sites, err := resolve(provider, in.Sites)
 		if err != nil {
 			return struct{}{}, &agent.PayloadError{Err: err}
 		}
@@ -384,42 +398,66 @@ func registerSites(r *agent.Registry, deps Deps) {
 		// wants; the host says what it actually has.
 		cfg := in.Config
 		cfg.WAFRulesFile = wafRulesIfInstalled()
+		cfg.ServerUser, cfg.ServerGroup = serverAccount(ws.Name(), cfg)
 		if st := pmaStatus(); st.Installed {
 			cfg.PMARoot = st.Root
 			cfg.PMAPort = PMAPort
-			cfg.PMALSAPIBinary = deps.PHP.LSAPIBinary(PMAPHPVersion)
+			cfg.PMALSAPIBinary = provider.LSAPIBinary(PMAPHPVersion)
+			if fp, ok := provider.(phpmgr.FPMProvider); ok {
+				cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
+			}
 		}
 
-		rendered, err := deps.Webserver.Render(cfg, sites)
+		rendered, err := ws.Render(cfg, sites)
 		if err != nil {
 			return struct{}{}, err
 		}
-		return struct{}{}, deps.Webserver.Apply(ctx, rendered)
+		// Pools before the webserver: Apache proxies to a socket, and a
+		// vhost pointing at one that does not exist yet answers 503 for as
+		// long as the gap lasts.
+		if fp, ok := provider.(phpmgr.FPMProvider); ok {
+			pools := phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB())
+			if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
+				pools = append(pools, pmaPool(cfg))
+			}
+			if err := phpfpm.Apply(ctx, fp, pools); err != nil {
+				return struct{}{}, err
+			}
+		}
+		return struct{}{}, ws.Apply(ctx, rendered)
 	})
 
 	agent.Register(r, "webserver.test", 1, func(ctx context.Context, _ struct{}) (struct{}, error) {
-		return struct{}{}, deps.Webserver.TestConfig(ctx)
+		ws, err := deps.Backend()
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, ws.TestConfig(ctx)
 	})
 
 	agent.Register(r, "webserver.status", 1, func(_ context.Context, _ struct{}) (WebserverStatusResult, error) {
+		ws, err := deps.Backend()
+		if err != nil {
+			return WebserverStatusResult{}, err
+		}
 		return WebserverStatusResult{
-			Backend:   deps.Webserver.Name(),
-			Unit:      deps.Webserver.ServiceUnit(),
-			Installed: deps.Webserver.Installed(),
+			Backend:   ws.Name(),
+			Unit:      ws.ServiceUnit(),
+			Installed: ws.Installed(),
 		}, nil
 	})
 
 	agent.Register(r, "php.list", 1, func(ctx context.Context, _ struct{}) (PHPListResult, error) {
-		vs, err := deps.PHP.Available(ctx)
-		return PHPListResult{Provider: deps.PHP.Name(), Versions: vs}, err
+		vs, err := deps.PHP().Available(ctx)
+		return PHPListResult{Provider: deps.PHP().Name(), Versions: vs}, err
 	})
 
 	agent.Register(r, "php.install", 1, func(ctx context.Context, in PHPVersionRequest) (struct{}, error) {
-		return struct{}{}, deps.PHP.Install(ctx, in.Version)
+		return struct{}{}, deps.PHP().Install(ctx, in.Version)
 	})
 
 	agent.Register(r, "php.uninstall", 1, func(ctx context.Context, in PHPVersionRequest) (struct{}, error) {
-		return struct{}{}, deps.PHP.Uninstall(ctx, in.Version)
+		return struct{}{}, deps.PHP().Uninstall(ctx, in.Version)
 	})
 
 	agent.Register(r, "cert.issue", 1, func(ctx context.Context, in CertIssueRequest) (acme.Certificate, error) {

@@ -1,0 +1,27 @@
+#
+# {{ .Config.PanelManagedComment }}
+#
+# The vhost for a hostname no site claims: an IP address typed into a
+# browser, a domain pointed here before it was added, a scanner walking the
+# address space. It serves nothing except the ACME challenge path, so a
+# certificate can be issued for a name before the site that will use it
+# exists -- which is the order people actually do it in.
+#
+
+<VirtualHost *:{{ .Config.HTTPPort }}>
+    ServerName localhost
+    DocumentRoot "{{ .ACMEWebroot }}"
+
+    Alias /.well-known/acme-challenge/ "{{ .ACMEWebroot }}/.well-known/acme-challenge/"
+
+    <Directory "{{ .ACMEWebroot }}">
+        Options None
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    # Anything else gets a flat 404. Not a redirect and not a default page:
+    # an unclaimed hostname on this server is not a site, and saying so
+    # plainly beats leaking which panel is running here.
+    RedirectMatch 404 ^(?!/\.well-known/acme-challenge/).*$
+</VirtualHost>

@@ -581,15 +581,44 @@ func (s *Service) AttachCertificate(ctx context.Context, siteID int64,
 // database. Every mutation ends here, which is what guarantees the rendered
 // configuration and the database never drift apart.
 func (s *Service) SyncWebserver(ctx context.Context) error {
-	rows, err := s.db.ListSites(ctx, db.ScopeAll())
+	specs, err := s.siteSpecs(ctx)
 	if err != nil {
 		return err
+	}
+	_, err = agentclient.Call[struct{}](ctx, s.agent, "webserver.apply", 1,
+		actions.WebserverApplyRequest{Config: s.cfg, Sites: specs})
+	return err
+}
+
+// SwitchWebserver moves the host to a different webserver.
+//
+// It sends the whole estate, not just the name, because the agent renders
+// every site for the new server before it stops the old one. Splitting that
+// into "switch" and then "sync" would leave the host serving nothing in
+// between, which on a live server is the one thing that must not happen.
+func (s *Service) SwitchWebserver(ctx context.Context, backend string) (actions.WebserverSwitchResult, error) {
+	specs, err := s.siteSpecs(ctx)
+	if err != nil {
+		return actions.WebserverSwitchResult{}, err
+	}
+	return agentclient.Call[actions.WebserverSwitchResult](ctx, s.agent, "webserver.switch", 1,
+		actions.WebserverSwitchRequest{
+			Backend:               backend,
+			WebserverApplyRequest: actions.WebserverApplyRequest{Config: s.cfg, Sites: specs},
+		})
+}
+
+// siteSpecs reads every site into the shape the agent renders from.
+func (s *Service) siteSpecs(ctx context.Context) ([]actions.SiteSpec, error) {
+	rows, err := s.db.ListSites(ctx, db.ScopeAll())
+	if err != nil {
+		return nil, err
 	}
 	// One query for every site's overrides rather than one per site: this
 	// runs on every change to any site.
 	phpSettings, err := s.db.AllSitePHPSettings(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	specs := make([]actions.SiteSpec, 0, len(rows))
 	for _, r := range rows {
@@ -611,9 +640,7 @@ func (s *Service) SyncWebserver(ctx context.Context) error {
 			PHPSettings:  phpSettings[r.ID],
 		})
 	}
-	_, err = agentclient.Call[struct{}](ctx, s.agent, "webserver.apply", 1,
-		actions.WebserverApplyRequest{Config: s.cfg, Sites: specs})
-	return err
+	return specs, nil
 }
 
 // EnsureAccount makes sure a panel user has its Linux account. It is safe to

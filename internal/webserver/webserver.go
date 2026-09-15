@@ -26,10 +26,20 @@ import (
 )
 
 // Backend names.
+//
+// Apache is the default. LiteSpeed Enterprise reads Apache's own
+// configuration, so those two share a renderer and switching between them
+// moves no files; OpenLiteSpeed has a format of its own and switching to it
+// is a full re-render.
 const (
-	BackendOLS  = "ols"
-	BackendLSWS = "lsws"
+	BackendApache = "apache"
+	BackendLSWS   = "lsws"
+	BackendOLS    = "ols"
 )
+
+// Backends lists every backend the panel can run, in the order a person
+// should be offered them.
+var Backends = []string{BackendApache, BackendLSWS, BackendOLS}
 
 // App types a site can be.
 const (
@@ -89,10 +99,16 @@ type Site struct {
 	OwnerUser  string
 	OwnerGroup string
 
-	// PHPVersion is informational; LSAPIBinary is what the renderer emits.
-	// Both are empty for a static site.
-	PHPVersion  string
+	// PHPVersion is informational; the handler below is what the renderer
+	// emits. All three are empty for a static site.
+	PHPVersion string
+	// LSAPIBinary is the interpreter LiteSpeed spawns for itself.
 	LSAPIBinary string
+	// FPMSocket is the pool Apache proxies to. Exactly one of the two is
+	// set: the two servers reach PHP by different mechanisms, and a site
+	// carrying both would render differently depending on which backend
+	// happened to read it.
+	FPMSocket string
 
 	SSLEnabled bool
 	CertFile   string
@@ -154,15 +170,23 @@ func (s Site) Validate() error {
 	if s.DocumentRoot != s.VhostRoot && !strings.HasPrefix(s.DocumentRoot, s.VhostRoot+"/") {
 		return fmt.Errorf("document root %q is outside vhost root %q", s.DocumentRoot, s.VhostRoot)
 	}
-	if s.NeedsPHP() {
-		if s.LSAPIBinary == "" {
-			return fmt.Errorf("site %q needs PHP but no interpreter was resolved", s.Domain)
-		}
+	switch {
+	case s.NeedsPHP() && s.LSAPIBinary == "" && s.FPMSocket == "":
+		return fmt.Errorf("site %q needs PHP but no interpreter was resolved", s.Domain)
+	case s.LSAPIBinary != "" && s.FPMSocket != "":
+		return fmt.Errorf("site %q carries both an lsapi binary and an fpm socket", s.Domain)
+	case !s.NeedsPHP() && (s.LSAPIBinary != "" || s.FPMSocket != ""):
+		return fmt.Errorf("static site %q must not carry a php handler", s.Domain)
+	}
+	if s.LSAPIBinary != "" {
 		if err := validAbsPath(s.LSAPIBinary, "php binary"); err != nil {
 			return err
 		}
-	} else if s.LSAPIBinary != "" {
-		return fmt.Errorf("static site %q must not carry a php binary", s.Domain)
+	}
+	if s.FPMSocket != "" {
+		if err := validAbsPath(s.FPMSocket, "php-fpm socket"); err != nil {
+			return err
+		}
 	}
 	if s.SSLEnabled {
 		if err := validAbsPath(s.CertFile, "certificate"); err != nil {
@@ -233,8 +257,11 @@ type ServerConfig struct {
 	PMARoot string
 	// PMAPort is the loopback port that vhost listens on.
 	PMAPort int
-	// PMALSAPIBinary is the PHP interpreter it runs.
+	// PMALSAPIBinary is the PHP interpreter LiteSpeed runs for it.
 	PMALSAPIBinary string
+	// PMAFPMSocket is the pool Apache proxies it to. As with a site, exactly
+	// one of the two applies, decided by which backend is active.
+	PMAFPMSocket string
 	// WAFRulesFile is the ModSecurity configuration to load, empty when the
 	// engine or its rules are not installed.
 	//
@@ -306,7 +333,7 @@ func (r Rendered) Files() []File {
 
 // Backend renders and applies configuration for one webserver.
 type Backend interface {
-	// Name is BackendOLS or BackendLSWS.
+	// Name is one of Backends.
 	Name() string
 	// Installed reports whether the webserver is present on the host.
 	Installed() bool

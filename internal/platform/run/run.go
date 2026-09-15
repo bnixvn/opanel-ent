@@ -87,6 +87,14 @@ func Stdin(s string) Option { return func(o *options) { o.stdin = s } }
 // server.
 func StdinFrom(r io.Reader) Option { return func(o *options) { o.stdinFrom = r } }
 
+// Env adds environment variables, each as "NAME=value". They are appended to
+// the process environment, so a name that is already there is overridden.
+func Env(vars ...string) Option { return func(o *options) { o.env = append(o.env, vars...) } }
+
+// Dir runs the command in a directory. Used where a vendor's installer
+// expects to be run from its own unpacked tree and reads files beside itself.
+func Dir(d string) Option { return func(o *options) { o.dir = d } }
+
 // AllowExit marks extra exit codes as success.
 func AllowExit(codes ...int) Option {
 	return func(o *options) { o.okCodes = append(o.okCodes, codes...) }

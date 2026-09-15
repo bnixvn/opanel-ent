@@ -22,10 +22,9 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
-	"github.com/bnixvn/opanel-ent/internal/platform/distro"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
-	"github.com/bnixvn/opanel-ent/internal/webserver/ols"
+	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
 func main() {
@@ -75,19 +74,14 @@ func run(log *slog.Logger, socketPath, apiUser, socketGroup, extraUIDs string) e
 		}
 	}
 
-	// The concrete backend and PHP provider are chosen here, at the one place
-	// that knows the host. Stage B swaps these two lines for LiteSpeed
-	// Enterprise and CloudLinux alt-php; no action handler changes.
-	ws, err := ols.New()
-	if err != nil {
-		return err
-	}
-	info := distro.Detect(context.Background())
-
+	// Resolved per call rather than chosen here. The panel can switch
+	// webserver while this process is running, and a backend captured at
+	// startup would go on writing the old server's configuration until
+	// somebody restarted the agent.
 	registry := agent.NewRegistry()
 	actions.RegisterAll(registry, actions.Deps{
-		Webserver: ws,
-		PHP:       phpmgr.Detect(info.CloudLinux),
+		Backend: backends.ActiveBackend,
+		PHP:     func() phpmgr.Provider { return phpmgr.ForBackend(backends.Active()) },
 	})
 
 	srv, err := agent.NewServer(agent.ServerOptions{

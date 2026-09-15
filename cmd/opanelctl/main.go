@@ -26,12 +26,15 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/installer"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
+
+	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
 const usage = `opanelctl -- OPanel operator CLI
 
 Usage:
   opanelctl install [flags]             install the panel on this host
+                       [--webserver apache|ols]
   opanelctl version                     print build version
   opanelctl doctor                      check database and agent health
   opanelctl db version                  print the applied schema version
@@ -102,11 +105,13 @@ func cmdInstall(ctx context.Context, args []string) error {
 	php := fs.String("php", "8.4,8.3", "comma-separated PHP versions to install")
 	binDir := fs.String("bin-dir", "", "directory holding the opanel binaries (default: alongside opanelctl)")
 	skipFW := fs.Bool("skip-firewall", false, "leave nftables alone")
+	ws := fs.String("webserver", backends.Default, "webserver to install: apache, ols")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	opts := &installer.Options{
+		Backend:      *ws,
 		PanelPort:    *port,
 		AdminUser:    *admin,
 		BinDir:       *binDir,

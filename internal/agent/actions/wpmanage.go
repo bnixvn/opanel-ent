@@ -158,16 +158,16 @@ func wpRunner(ctx context.Context, deps Deps, owner, docRoot, phpVersion string)
 	if err != nil || acct == nil {
 		return nil, fmt.Errorf("account %q does not exist", owner)
 	}
-	php := deps.PHP.CLIBinary(phpVersion)
+	php := deps.PHP().CLIBinary(phpVersion)
 	if phpVersion == "" || !fileExists(php) {
 		// Falling back rather than failing: a site whose PHP version was
 		// removed still has WordPress in it, and the manager should be able
 		// to say so rather than showing nothing. Newest first, because a
 		// plugin is likelier to work on a newer interpreter than an older.
 		php = ""
-		supported := deps.PHP.Supported()
+		supported := deps.PHP().Supported()
 		for i := len(supported) - 1; i >= 0; i-- {
-			if candidate := deps.PHP.CLIBinary(supported[i]); fileExists(candidate) {
+			if candidate := deps.PHP().CLIBinary(supported[i]); fileExists(candidate) {
 				php = candidate
 				break
 			}

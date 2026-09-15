@@ -14,6 +14,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
 //go:embed assets
@@ -30,6 +32,10 @@ type Options struct {
 	AdminUser string
 	// PHPVersions are installed; the first is the default for new sites.
 	PHPVersions []string
+	// Backend is the webserver to install and run. Empty means Apache, which
+	// is also the format LiteSpeed Enterprise reads -- so the default leaves
+	// the door open to the commercial server without a migration.
+	Backend string
 	// SkipFirewall leaves nftables alone, for a host whose firewall is
 	// managed elsewhere.
 	SkipFirewall bool
@@ -44,6 +50,9 @@ func (o *Options) Defaults() {
 	}
 	if o.AdminUser == "" {
 		o.AdminUser = "admin"
+	}
+	if o.Backend == "" {
+		o.Backend = backends.Default
 	}
 	if len(o.PHPVersions) == 0 {
 		o.PHPVersions = []string{"8.4", "8.3"}

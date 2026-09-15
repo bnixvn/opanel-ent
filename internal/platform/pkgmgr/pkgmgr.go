@@ -107,6 +107,23 @@ func Install(ctx context.Context, names ...string) error {
 	return err
 }
 
+// urlPattern accepts an https URL to an rpm and nothing else.
+//
+// Installing by URL is how a repository definition arrives, and it is the one
+// place dnf is handed something that is not a package name. Restricting it to
+// https and to a .rpm suffix keeps that hole the shape of the thing it exists
+// for: no http, no file://, no path that could be read as an option.
+var urlPattern = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*\.rpm$`)
+
+// InstallURL adds a package from an https URL, for repository definitions.
+func InstallURL(ctx context.Context, url string) error {
+	if !urlPattern.MatchString(url) {
+		return fmt.Errorf("pkgmgr: %q is not an https url to an rpm", url)
+	}
+	_, err := run.Cmd(ctx, []string{dnf, "install", "-y", url}, run.Timeout(installTimeout))
+	return err
+}
+
 // Remove deletes packages.
 func Remove(ctx context.Context, names ...string) error {
 	if err := checkNames(names); err != nil {

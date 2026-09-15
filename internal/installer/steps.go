@@ -20,7 +20,8 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
 	"github.com/bnixvn/opanel-ent/internal/platform/svc"
-	"github.com/bnixvn/opanel-ent/internal/webserver/ols"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
+	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
 // Accounts and paths the installation creates.
@@ -57,8 +58,7 @@ func allSteps() []Step {
 	return []Step{
 		{Name: "Check host", Apply: stepCheckHost},
 		{Name: "Install base packages", Check: checkBasePackages, Apply: stepBasePackages},
-		{Name: "Add LiteSpeed repository", Check: checkFile("/etc/yum.repos.d/litespeed.repo"), Apply: stepLiteSpeedRepo},
-		{Name: "Install OpenLiteSpeed", Check: checkOLS, Apply: stepInstallOLS},
+		{Name: "Install web server", Check: checkWebserver, Apply: stepInstallWebserver},
 		{Name: "Install PHP", Check: checkPHP, Apply: stepInstallPHP},
 		{Name: "Add MariaDB repository", Check: checkFile("/etc/yum.repos.d/mariadb.repo"), Apply: stepMariaDBRepo},
 		{Name: "Install MariaDB", Check: checkMariaDB, Apply: stepInstallMariaDB},
@@ -67,6 +67,7 @@ func allSteps() []Step {
 		{Name: "Create directories", Apply: stepDirectories},
 		{Name: "Install binaries", Apply: stepBinaries},
 		{Name: "Install systemd units", Apply: stepUnits},
+		{Name: "Write web server configuration", Apply: stepWebserverConfig},
 		{Name: "Enable disk quota", Check: checkProjectQuota, Apply: stepProjectQuota},
 		{Name: "Install WP-CLI", Check: checkWPCLI, Apply: stepWPCLI},
 		{Name: "Install Composer", Check: checkComposer, Apply: stepComposer},
@@ -279,26 +280,71 @@ func stepLiteSpeedRepo(ctx context.Context, _ *Options) error {
 	return nil
 }
 
-func checkOLS(context.Context, *Options) (bool, error) {
-	b, err := ols.New()
+func checkWebserver(_ context.Context, o *Options) (bool, error) {
+	b, err := backends.New(o.Backend)
 	if err != nil {
 		return false, err
 	}
 	return b.Installed(), nil
 }
 
-func stepInstallOLS(ctx context.Context, _ *Options) error {
-	if err := pkgmgr.Install(ctx, "openlitespeed"); err != nil {
+// stepInstallWebserver installs the server this host will run.
+//
+// Apache is the default, and the reason is not performance -- LiteSpeed beats
+// it -- but that LiteSpeed Enterprise reads Apache's configuration. Installing
+// Apache first means the panel's configuration is already in the format the
+// commercial server wants, so buying a licence later is a switch rather than a
+// migration.
+func stepInstallWebserver(ctx context.Context, o *Options) error {
+	switch o.Backend {
+	case webserver.BackendOLS:
+		if err := stepLiteSpeedRepo(ctx, o); err != nil {
+			return err
+		}
+		if err := pkgmgr.Install(ctx, "openlitespeed"); err != nil {
+			return err
+		}
+		// The package ships a demo vhost on port 8088 and starts it. The
+		// panel rewrites the configuration on its first apply, but until then
+		// leaving the demo listening is needless exposure.
+		return svc.Enable(ctx, "lshttpd", true)
+	default:
+		// mod_ssl alongside httpd: it carries the Listen for 443, and every
+		// site with a certificate renders a vhost that needs it.
+		if err := pkgmgr.Install(ctx, "httpd", "mod_ssl"); err != nil {
+			return err
+		}
+		// Started now rather than at the first site. A certificate for the
+		// panel itself is issued over HTTP-01 on port 80, and on a fresh host
+		// that happens before any site exists.
+		return svc.Enable(ctx, "httpd", true)
+	}
+}
+
+// stepWebserverConfig writes the panel's configuration for a host with no
+// sites yet, and records which server is running.
+//
+// Done at install time rather than waiting for the first site, because the
+// challenge path that Let's Encrypt fetches lives in this configuration. A
+// host without it cannot get a certificate for the panel, which is the first
+// thing an operator does and the one thing passkeys will not work without.
+func stepWebserverConfig(ctx context.Context, o *Options) error {
+	if err := backends.SetActive(o.Backend); err != nil {
 		return err
 	}
-	// The package ships a demo vhost on port 8088 and starts it. The panel
-	// rewrites the configuration on its first apply, but until then leaving
-	// the demo listening is needless exposure.
-	return svc.Enable(ctx, "lshttpd", true)
+	b, err := backends.New(o.Backend)
+	if err != nil {
+		return err
+	}
+	rendered, err := b.Render(webserver.DefaultServerConfig(), nil)
+	if err != nil {
+		return err
+	}
+	return b.Apply(ctx, rendered)
 }
 
 func checkPHP(ctx context.Context, o *Options) (bool, error) {
-	p := phpmgr.NewLSPHP()
+	p := phpmgr.ForBackend(o.Backend)
 	versions, err := p.Available(ctx)
 	if err != nil {
 		return false, err
@@ -316,7 +362,7 @@ func checkPHP(ctx context.Context, o *Options) (bool, error) {
 }
 
 func stepInstallPHP(ctx context.Context, o *Options) error {
-	p := phpmgr.NewLSPHP()
+	p := phpmgr.ForBackend(o.Backend)
 	for _, v := range o.PHPVersions {
 		if err := p.Install(ctx, v); err != nil {
 			return fmt.Errorf("install PHP %s: %w", v, err)

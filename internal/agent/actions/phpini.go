@@ -57,7 +57,7 @@ func registerPHPIni(r *agent.Registry, deps Deps) {
 
 // writePHPIni renders the drop-in and restarts the interpreters.
 func writePHPIni(ctx context.Context, deps Deps, in PHPIniRequest) (PHPIniResult, error) {
-	path := deps.PHP.IniDropIn(in.Version)
+	path := deps.PHP().IniDropIn(in.Version)
 
 	// A version that is not installed has no scan directory, and creating one
 	// would leave a file that takes effect later, silently, if the version is
@@ -87,7 +87,10 @@ func writePHPIni(ctx context.Context, deps Deps, in PHPIniRequest) (PHPIniResult
 	// the external applications are restarted. Reported rather than assumed:
 	// a failure here means the file is right and the running processes are
 	// not, which the operator has to know.
-	reloaded := deps.Webserver.Reload(ctx) == nil
+	reloaded := false
+	if ws, err := deps.Backend(); err == nil {
+		reloaded = ws.Reload(ctx) == nil
+	}
 	return PHPIniResult{Path: path, Lines: len(checked), Reloaded: reloaded}, nil
 }
 
@@ -162,7 +165,7 @@ func readPHPIni(_ context.Context, deps Deps, version string) (PHPIniReadResult,
 		Values:  map[string]string{},
 		Managed: map[string]string{},
 	}
-	dropIn := deps.PHP.IniDropIn(version)
+	dropIn := deps.PHP().IniDropIn(version)
 	scanDir := filepath.Dir(dropIn)
 	if _, err := os.Stat(scanDir); err != nil {
 		return out, fmt.Errorf("php %s is not installed on this server", version)
