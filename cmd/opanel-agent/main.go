@@ -23,7 +23,9 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 	"github.com/bnixvn/opanel-ent/internal/version"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
 	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
@@ -78,6 +80,15 @@ func run(log *slog.Logger, socketPath, apiUser, socketGroup, extraUIDs string) e
 	// webserver while this process is running, and a backend captured at
 	// startup would go on writing the old server's configuration until
 	// somebody restarted the agent.
+	// What starts at boot has to agree with what the panel says is running.
+	// Nothing kept those two in step: a switch sets both, but anything that
+	// touched one of them alone -- a restore, an operator with systemctl, a
+	// switch interrupted midway -- left the host set to start one server
+	// while the panel rendered configuration for the other. The next reboot
+	// resolves that in systemd's favour, silently, which is the worst moment
+	// to find out.
+	reconcileBootState(context.Background(), log)
+
 	registry := agent.NewRegistry()
 	actions.RegisterAll(registry, actions.Deps{
 		Backend: backends.ActiveBackend,
@@ -206,4 +217,46 @@ func newLogger(level string) *slog.Logger {
 	// Text output: systemd captures stderr into the journal, where key=value
 	// pairs stay readable with journalctl and greppable without jq.
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lv}))
+}
+
+// reconcileBootState makes systemd agree with the recorded backend.
+//
+// At agent startup, because that is the one moment the panel is certainly
+// running and certainly root, and because a host that has just booted wrong
+// is a host somebody is already looking at.
+//
+// Measured on a real server: both web servers running at once, and the one
+// enabled at boot was not the one the panel was rendering configuration for.
+// Nothing was going to notice until a reboot.
+func reconcileBootState(ctx context.Context, log *slog.Logger) {
+	active := backends.Active()
+	for _, name := range webserver.Backends {
+		b, err := backends.New(name)
+		if err != nil || !b.Installed() {
+			continue
+		}
+		unit := b.ServiceUnit()
+		if name == active {
+			if err := svc.Enable(ctx, unit, false); err != nil {
+				log.Warn("agent: could not enable the active webserver", "unit", unit, "err", err)
+			}
+			continue
+		}
+		st, err := svc.Get(ctx, unit)
+		if err != nil || st.Enabled == "not-found" {
+			continue
+		}
+		// Two servers cannot both hold port 80. Whichever this is, it is
+		// either serving nothing or serving instead of the one the panel
+		// thinks is in charge.
+		if st.Running() {
+			log.Warn("agent: stopping a web server that is not the active one", "unit", unit)
+			if err := svc.Stop(ctx, unit); err != nil {
+				log.Warn("agent: could not stop it", "unit", unit, "err", err)
+			}
+		}
+		if err := svc.Disable(ctx, unit, false); err != nil {
+			log.Warn("agent: could not disable it", "unit", unit, "err", err)
+		}
+	}
 }
