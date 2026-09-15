@@ -22,6 +22,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
 	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 	"github.com/bnixvn/opanel-ent/internal/webserver"
+	"github.com/bnixvn/opanel-ent/internal/webserver/apache"
 	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
@@ -68,7 +69,7 @@ func allSteps() []Step {
 		{Name: "Create directories", Apply: stepDirectories},
 		{Name: "Install binaries", Apply: stepBinaries},
 		{Name: "Install systemd units", Apply: stepUnits},
-		{Name: "Write web server configuration", Apply: stepWebserverConfig},
+		{Name: "Write web server configuration", Check: checkWebserverConfig, Apply: stepWebserverConfig},
 		{Name: "Enable disk quota", Check: checkProjectQuota, Apply: stepProjectQuota},
 		{Name: "Install WP-CLI", Check: checkWPCLI, Apply: stepWPCLI},
 		{Name: "Install Composer", Check: checkComposer, Apply: stepComposer},
@@ -328,6 +329,52 @@ func stepWebserverConfig(ctx context.Context, o *Options) error {
 		return err
 	}
 	return b.Apply(ctx, rendered)
+}
+
+// checkWebserverConfig reports the step as done when this host already has
+// sites, which makes re-running the installer safe.
+//
+// Apply replaces the whole managed tree rather than patching it. That is what
+// makes a render from the database authoritative -- and exactly what makes
+// rendering from *no* sites destructive here. The README says to re-run the
+// installer to upgrade, and doing so on a live host deleted every site's
+// vhost and left the estate serving 404 until some later panel change
+// happened to re-render it. Measured, on a host with one site.
+//
+// The database is not reachable from the installer; the rendered vhosts are,
+// and their presence means an earlier render had sites to write. That is the
+// honest signal. An upgrade's refreshed configuration comes from the
+// re-render `opanelctl install` does afterwards, which has the database.
+func checkWebserverConfig(_ context.Context, o *Options) (bool, error) {
+	b, err := backends.New(o.Backend)
+	if err != nil {
+		return false, err
+	}
+	// Render is pure and does no I/O, so this only asks the backend where it
+	// would put things.
+	rendered, err := b.Render(webserver.DefaultServerConfig(), nil)
+	if err != nil {
+		return false, err
+	}
+	for _, dir := range rendered.VhostDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, err
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".conf") {
+				continue
+			}
+			if e.Name() == apache.DefaultVhostFile {
+				continue // written even on a host with no sites
+			}
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func checkPHP(ctx context.Context, o *Options) (bool, error) {

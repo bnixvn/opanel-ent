@@ -178,6 +178,16 @@ func (d *DB) DeleteSite(ctx context.Context, id int64) error {
 	return err
 }
 
+// CountSites reports how many sites this host serves.
+//
+// Used to decide whether a re-run of the installer has an estate to re-render
+// rather than a blank host to set up.
+func (d *DB) CountSites(ctx context.Context) (int, error) {
+	var n int
+	err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM sites`).Scan(&n)
+	return n, err
+}
+
 // CountSitesByOwner reports how many sites a user owns, for plan limits.
 func (d *DB) CountSitesByOwner(ctx context.Context, ownerID int64) (int, error) {
 	var n int

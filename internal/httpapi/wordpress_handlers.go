@@ -47,8 +47,15 @@ func (s *Server) handleWordPressInstall(w http.ResponseWriter, r *http.Request) 
 		Title      string `json:"title"`
 		AdminUser  string `json:"admin_user"`
 		AdminEmail string `json:"admin_email"`
-		Locale     string `json:"locale"`
-		UseHTTPS   *bool  `json:"use_https"`
+		// AdminPassword is optional; the form says so, and an empty one means
+		// the panel generates it. It was missing from this struct while the
+		// form sent it, so decodeJSON -- which refuses unknown fields --
+		// rejected every install where somebody actually typed a password.
+		// Leaving the box empty dropped the key and worked, which is why it
+		// survived every test.
+		AdminPassword string `json:"admin_password"`
+		Locale        string `json:"locale"`
+		UseHTTPS      *bool  `json:"use_https"`
 	}
 	if r.ContentLength > 0 && !decodeJSON(w, r, &req) {
 		return
@@ -87,9 +94,20 @@ func (s *Server) handleWordPressInstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Checked here rather than left to WordPress: wp-cli accepts anything,
+	// so a two-character password would be taken, written into the database
+	// and handed back as if it were fine.
+	if n := len(req.AdminPassword); n > 0 && n < 12 {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"a WordPress administrator password must be at least 12 characters, "+
+				"or left empty for the panel to generate one")
+		return
+	}
+
 	res, err := s.wordpress.Install(r.Context(), wordpress.Request{
 		Site: site, Title: req.Title, AdminUser: req.AdminUser,
-		AdminEmail: req.AdminEmail, Locale: req.Locale, UseHTTPS: useHTTPS,
+		AdminEmail: req.AdminEmail, AdminPassword: req.AdminPassword,
+		Locale: req.Locale, UseHTTPS: useHTTPS,
 	})
 	if err != nil {
 		s.audit(r, "wordpress.install", site.Domain, false, err.Error())

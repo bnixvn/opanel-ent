@@ -259,3 +259,34 @@ func TestNoLiteSpeedBlockWithoutAnInterpreter(t *testing.T) {
 		t.Errorf("emitted a LiteSpeed handler for a version the host does not have:\n%s", out)
 	}
 }
+
+// VhostDirs was declared and never set, so everything that asked a render
+// where the vhosts live got an empty list and silently did nothing. The
+// installer's guard against overwriting a live estate was one such caller,
+// and it failed open: it decided a host with two sites had none.
+func TestRenderReportsWhereVhostsLive(t *testing.T) {
+	r := render(t, webserver.DefaultServerConfig(), nil)
+	if len(r.VhostDirs) == 0 {
+		t.Fatal("a render named no vhost directory; every caller that prunes or counts by it is a no-op")
+	}
+	for _, dir := range r.VhostDirs {
+		if !strings.HasPrefix(dir, "/") {
+			t.Errorf("vhost directory %q is not an absolute path", dir)
+		}
+	}
+	// Every vhost the render produced has to be inside one of them, or Apply
+	// would prune the file it just wrote.
+	site := testSite("inside.example", "cust", webserver.AppPHP, "8.4")
+	r = render(t, webserver.DefaultServerConfig(), []webserver.Site{site})
+	for _, v := range r.Vhosts {
+		ok := false
+		for _, dir := range r.VhostDirs {
+			if strings.HasPrefix(v.Path, dir+"/") {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Errorf("%s is not under any declared vhost directory %v", v.Path, r.VhostDirs)
+		}
+	}
+}

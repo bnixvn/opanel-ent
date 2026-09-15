@@ -192,6 +192,10 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 
 	out := webserver.Rendered{
 		Main: webserver.File{Path: b.confPath, Content: main, Mode: fileMode},
+		// Declared because Apply prunes by it, and because callers ask where
+		// the vhosts live -- the installer has to know whether this host
+		// already has any before it renders a configuration with none.
+		VhostDirs: []string{VhostsDir},
 	}
 
 	def, err := b.render("default.conf.tmpl", mainData{

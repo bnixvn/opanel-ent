@@ -156,6 +156,21 @@ func cmdInstall(ctx context.Context, args []string) error {
 		fmt.Printf("%d panel user(s) already exist; no administrator was created.\n", n)
 	}
 
+	// An upgrade refreshes the rendered configuration, and this is the only
+	// place that can: the installer step deliberately leaves an existing
+	// estate alone, because it renders from no sites and Apply replaces
+	// everything it is given. Here the database is open, so the render has
+	// every site in it -- which is also how a template change in a new
+	// release reaches vhosts that already exist.
+	if n, err := database.CountSites(ctx); err == nil && n > 0 {
+		ac := agentclient.New(cfg.AgentSocket, actions.SwitchBudget)
+		svc := sites.New(database, ac, webserver.DefaultServerConfig(), nil, nil)
+		if err := svc.SyncWebserver(ctx); err != nil {
+			return fmt.Errorf("re-render the %d existing site(s): %w", n, err)
+		}
+		fmt.Printf("Re-rendered %d existing site(s).\n", n)
+	}
+
 	// A host that already has a certificate is usually one being upgraded,
 	// and telling that operator to go and fix a self-signed certificate they
 	// replaced months ago sends them looking for a problem that is not there.

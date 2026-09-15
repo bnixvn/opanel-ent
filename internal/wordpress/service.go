@@ -59,7 +59,10 @@ type Request struct {
 	// WordPress sites from one hosting account.
 	AdminUser  string
 	AdminEmail string
-	Locale     string
+	// AdminPassword is what the person installing chose. Empty means
+	// generate one, which is what the form offers and what most people take.
+	AdminPassword string
+	Locale        string
 	// UseHTTPS decides the site URL WordPress records. It matters more than
 	// it looks: WordPress writes the URL into the database and then refuses
 	// to serve on any other, so getting it wrong means a site that redirects
@@ -122,9 +125,16 @@ func (s *Service) Install(ctx context.Context, req Request) (*Result, error) {
 		return nil, fmt.Errorf("grant the database account access: %w", err)
 	}
 
-	adminPassword, err := databases.GeneratePassword()
-	if err != nil {
-		return nil, err
+	// Generated unless one was supplied. Either way it is returned once and
+	// never stored anywhere the panel can read it back, which is the same
+	// contract a new database account gets.
+	adminPassword := req.AdminPassword
+	if adminPassword == "" {
+		generated, err := databases.GeneratePassword()
+		if err != nil {
+			return nil, err
+		}
+		adminPassword = generated
 	}
 
 	scheme := "http"
