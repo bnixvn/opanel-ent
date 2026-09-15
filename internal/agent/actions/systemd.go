@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
@@ -103,6 +105,29 @@ type UnitListResult struct {
 	Units []svc.Status `json:"units"`
 }
 
+// idleFPM reports a pool manager that is stopped because no site asks for
+// that PHP version.
+func idleFPM(unit string, st svc.Status) bool {
+	version, ok := fpmUnitVersion(unit)
+	if !ok || st.Running() {
+		return false
+	}
+	return phpmgr.NewRemi().PoolCount(version) == 0
+}
+
+// fpmUnitVersion turns "php84-php-fpm" back into "8.4".
+func fpmUnitVersion(unit string) (string, bool) {
+	rest, ok := strings.CutSuffix(unit, "-php-fpm")
+	if !ok {
+		return "", false
+	}
+	digits, ok := strings.CutPrefix(rest, "php")
+	if !ok || len(digits) != 2 {
+		return "", false
+	}
+	return digits[:1] + "." + digits[1:], true
+}
+
 func registerSystemd(r *agent.Registry) {
 	agent.Register(r, "systemd.status", 1, func(ctx context.Context, in UnitRequest) (svc.Status, error) {
 		return svc.Get(ctx, in.Unit)
@@ -117,6 +142,13 @@ func registerSystemd(r *agent.Registry) {
 			}
 			// Units that are not installed are noise on a fresh host.
 			if st.Enabled == "not-found" && st.Active != "active" {
+				continue
+			}
+			// A PHP version nobody's site uses is deliberately stopped, and
+			// showing it here as a stopped service reads as something to go
+			// and fix. The PHP page is where a version's state belongs,
+			// alongside the number of sites that explains it.
+			if idleFPM(u, st) {
 				continue
 			}
 			out.Units = append(out.Units, st)

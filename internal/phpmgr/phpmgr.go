@@ -28,6 +28,14 @@ type Version struct {
 	Version   string `json:"version"` // "8.4"
 	Installed bool   `json:"installed"`
 	FPMPath   string `json:"fpm_path,omitempty"` // pool manager the server proxies to
+	// Pools is how many sites run on this version, and Running whether its
+	// pool manager is up.
+	//
+	// Both are reported because the pair is the answer to a question the
+	// panel was getting asked: a version with no sites is deliberately not
+	// running, and showing it as simply "stopped" reads as a fault.
+	Pools     int    `json:"pools"`
+	Running   bool   `json:"running"`
 	CLIPath   string `json:"cli_path,omitempty"` // binary WP-CLI and cron run
 	IsDefault bool   `json:"is_default,omitempty"`
 

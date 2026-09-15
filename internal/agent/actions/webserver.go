@@ -216,8 +216,8 @@ func canServePHP(backend string, sites []webserver.Site) error {
 	return &agent.DeniedError{Reason: fmt.Sprintf(
 		"LiteSpeed Enterprise reads this panel's Apache configuration but not its PHP-FPM "+
 			"handler, so %d site(s) including %s would have their PHP source served instead "+
-			"of run. Switching is blocked until the panel can give LiteSpeed an interpreter "+
-			"of its own", len(php), php[0])}
+			"of run. Switch back to Apache to host PHP; LiteSpeed is usable here for static "+
+			"sites until the panel can give it an interpreter of its own", len(php), php[0])}
 }
 
 // portsOf is what the new server has to be able to bind.

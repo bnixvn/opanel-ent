@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
 // RemiRoot is where Remi's packages install each version. The layout is the
@@ -121,9 +122,9 @@ func (p *Remi) ServiceUnit(version string) string {
 	return "php" + pkgSuffix(version) + "-php-fpm"
 }
 
-// Available reports which supported versions are installed.
+// Available reports which supported versions are installed, how many sites
+// each one runs, and whether its pool manager is up.
 func (p *Remi) Available(ctx context.Context) ([]Version, error) {
-	_ = ctx
 	out := make([]Version, 0, len(remiVersions))
 	for _, v := range remiVersions {
 		ver := Version{Version: v}
@@ -131,6 +132,10 @@ func (p *Remi) Available(ctx context.Context) ([]Version, error) {
 			ver.Installed = true
 			ver.CLIPath = p.CLIBinary(v)
 			ver.FPMPath = p.FPMBinary(v)
+			ver.Pools = p.PoolCount(v)
+			if st, err := svc.Get(ctx, p.ServiceUnit(v)); err == nil {
+				ver.Running = st.Running()
+			}
 			if st, err := os.Stat(p.IonCubeLoader(v)); err == nil && !st.IsDir() {
 				ver.IonCube = true
 			}
@@ -138,6 +143,19 @@ func (p *Remi) Available(ctx context.Context) ([]Version, error) {
 		out = append(out, ver)
 	}
 	return out, nil
+}
+
+// PoolCount is how many sites run on this version.
+//
+// Counted from the pool files the panel wrote, not from the database: this
+// is the agent's side, and what the interpreter will actually serve is the
+// files on disk.
+func (p *Remi) PoolCount(version string) int {
+	matches, err := filepath.Glob(filepath.Join(p.PoolDir(version), "opanel-*.conf"))
+	if err != nil {
+		return 0
+	}
+	return len(matches)
 }
 
 // Install adds a version with as much of the standard extension set as the

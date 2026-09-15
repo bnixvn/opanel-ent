@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Card, Empty, Message, Tag, useConfirm, Confirm, useMessage } from '../components.jsx';
+import { Card, Empty, Message, Tag, useConfirm, useMessage } from '../components.jsx';
 
 export default function Webserver() {
   const [state, setState] = useState(null);
   const [busy, setBusy] = useState(null);
   const [serial, setSerial] = useState('');
   const msg = useMessage();
-  const confirm = useConfirm();
+  const { ask, dialog } = useConfirm();
 
   const load = useCallback(() => {
     api.get('/webserver/backends').then(setState).catch(msg.fail);
@@ -16,7 +16,7 @@ export default function Webserver() {
   useEffect(() => { load(); }, [load]);
 
   async function switchTo(b) {
-    const ok = await confirm.ask({
+    const ok = await ask({
       title: `Switch to ${b.label}?`,
       // The one thing a person needs to know before pressing it, and the one
       // thing they will be angry about not being told.
@@ -60,7 +60,7 @@ export default function Webserver() {
   return (
     <>
       <Message value={msg.message} onClear={msg.clear} />
-      <Confirm {...confirm.props} />
+      {dialog}
 
       <Card title="Web server">
         {!state ? <Empty>Loading.</Empty> : (
@@ -139,13 +139,35 @@ export default function Webserver() {
 
       {state && (
         <Card title="PHP">
-          <dl className="kv">
-            <dt>Provider</dt><dd><code>{state.php_provider}</code></dd>
-            <dt>Installed</dt>
-            <dd>
-              {(state.php_versions || []).filter((v) => v.installed).map((v) => v.version).join(', ') || '—'}
-            </dd>
-          </dl>
+          <p className="muted">
+            A version runs only while a site uses it. One with no sites is
+            stopped on purpose: an idle pool manager is memory spent serving
+            nobody, and it starts again the moment a site is pointed at it.
+          </p>
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr><th>Version</th><th>Sites</th><th>State</th><th>Interpreter</th></tr>
+              </thead>
+              <tbody>
+                {(state.php_versions || []).filter((v) => v.installed).map((v) => (
+                  <tr key={v.version}>
+                    <td><strong>{v.version}</strong></td>
+                    <td>{v.pools || 0}</td>
+                    <td className="nowrap">
+                      {v.running ? <Tag kind="ok">running</Tag>
+                        : v.pools ? <Tag kind="bad">stopped</Tag>
+                          : <Tag>idle</Tag>}
+                    </td>
+                    <td className="muted"><code>{v.fpm_path || '—'}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted" style={{ marginTop: '.75rem' }}>
+            Provider <code>{state.php_provider}</code>.
+          </p>
         </Card>
       )}
     </>

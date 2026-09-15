@@ -378,6 +378,13 @@ func registerSites(r *agent.Registry, deps Deps) {
 		if err != nil {
 			return struct{}{}, &agent.PayloadError{Err: err}
 		}
+		// The same refusal the switch makes, at the other end. Blocking only
+		// the switch left a way in: a host already on LiteSpeed with no sites
+		// would accept its first PHP site and serve the source of it. The
+		// danger is the pairing, so both places that can create it say no.
+		if err := canServePHP(ws.Name(), sites); err != nil {
+			return struct{}{}, err
+		}
 		// Sites created before the log directory mode was corrected still
 		// have one the webserver cannot enter. Fixing it here means the
 		// existing estate is repaired by the next configuration change
