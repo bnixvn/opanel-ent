@@ -20,6 +20,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
+	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
@@ -649,8 +650,17 @@ func (s *Service) EnsureAccount(ctx context.Context, u *db.User) error {
 	if u.LinuxUID != nil && *u.LinuxUID > 0 {
 		return nil
 	}
-	acct, err := agentclient.Call[linuxuser.Account](ctx, s.agent, "linuxuser.create", 1,
-		actions.AccountRequest{Username: u.Username})
+	// Which action depends on who this is. The agent has two, because the
+	// name rules genuinely differ: a customer may not be called admin, and
+	// the administrator the installer creates is. Sending every account down
+	// the customer path meant an administrator could not own a site at all on
+	// a fresh install -- their first one failed complaining about the name
+	// the installer had just given them.
+	action, req := "linuxuser.create", any(actions.AccountRequest{Username: u.Username})
+	if u.Role != string(auth.RoleEndUser) {
+		action, req = "linuxuser.create_staff", actions.StaffAccountRequest{Username: u.Username}
+	}
+	acct, err := agentclient.Call[linuxuser.Account](ctx, s.agent, action, 1, req)
 	if err != nil {
 		return fmt.Errorf("create Linux account for %q: %w", u.Username, err)
 	}

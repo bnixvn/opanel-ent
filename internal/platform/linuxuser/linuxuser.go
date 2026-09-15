@@ -190,6 +190,30 @@ func create(ctx context.Context, username string) (*Account, error) {
 	return acct, nil
 }
 
+// sealHome takes a kept home directory out of the id space.
+//
+// Recursive because the files inside carry the old uid too, and it is the
+// files somebody would read. Failure is reported: a half-sealed home is worse
+// than a refused delete, because nothing else will come back to finish it.
+func sealHome(ctx context.Context, home string) error {
+	if home == "" || home == "/" || !strings.HasPrefix(home, "/home/") {
+		// Not a customer home. Nothing to seal, and a chown -R aimed at the
+		// wrong path is not a mistake worth risking.
+		return nil
+	}
+	if _, err := os.Stat(home); err != nil {
+		return nil
+	}
+	if _, err := run.Cmd(ctx, []string{"chown", "-R", "root:root", home},
+		run.Timeout(10*time.Minute)); err != nil {
+		return fmt.Errorf("linuxuser: secure the kept home %s: %w", home, err)
+	}
+	if err := os.Chmod(home, 0o700); err != nil {
+		return fmt.Errorf("linuxuser: secure the kept home %s: %w", home, err)
+	}
+	return nil
+}
+
 // Delete removes an account. The home directory goes with it only when
 // removeHome is set, so an accidental delete does not destroy customer data.
 func Delete(ctx context.Context, username string, removeHome bool) error {
@@ -220,7 +244,17 @@ func Delete(ctx context.Context, username string, removeHome bool) error {
 		return fmt.Errorf("linuxuser: delete %q: %w", username, err)
 	}
 	if !removeHome {
-		return nil
+		// Keeping the files is the default, and on its own it is not safe.
+		// userdel frees the uid and gid, and the next account created takes
+		// them: the leftover home then belongs, by number, to a customer who
+		// has never heard of the one who left. Measured on a real host --
+		// a deleted account's home group-owned by a live account, mode 0751,
+		// which is read and traverse.
+		//
+		// So the files stay and the ownership does not. root:root and 0700
+		// keeps them for whoever has to go and get them, and out of reach of
+		// everyone else however the ids are reused.
+		return sealHome(ctx, acct.Home)
 	}
 
 	// Containment check before a recursive delete running as root. acct.Home

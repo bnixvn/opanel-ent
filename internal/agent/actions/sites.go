@@ -33,6 +33,11 @@ type AccountRequest struct {
 }
 
 // Validate checks the account name against the panel's rules.
+//
+// The strict rule, because this action makes a customer's account: a customer
+// called admin is one who looks like staff in every log and every directory
+// listing. An operator's own account goes through linuxuser.create_staff,
+// which judges the same name differently and says why.
 func (r *AccountRequest) Validate() error {
 	if !linuxuser.ValidName(r.Username) {
 		return fmt.Errorf("%q is not an acceptable account name", r.Username)
