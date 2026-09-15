@@ -27,7 +27,9 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/installer"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
+	"github.com/bnixvn/opanel-ent/internal/sites"
 	"github.com/bnixvn/opanel-ent/internal/version"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
 
 	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
@@ -36,7 +38,7 @@ const usage = `opanelctl -- OPanel operator CLI
 
 Usage:
   opanelctl install [flags]             install the panel on this host
-                       [--webserver apache|ols]
+                       [--webserver apache|lsws]
   opanelctl version                     print build version
   opanelctl doctor                      check database and agent health
   opanelctl db version                  print the applied schema version
@@ -48,6 +50,10 @@ Usage:
   opanelctl user create-admin <name>    create an administrator
   opanelctl user create <name> <role>   create a user (admin|reseller|end_user)
   opanelctl user list                   list panel users
+  opanelctl cloudlinux setup            bring a converted host the rest of
+                                        the way: integration, alt-php, PHP
+                                        Selector, Manager, and move sites
+                       [--skip-selector] [--skip-manager] [--stay-on-remi]
   opanelctl cloudlinux install          let CloudLinux read this panel
   opanelctl cloudlinux cpapi <script>   answer one CloudLinux query
   opanelctl passkeys off                stop asking for passkeys, server-wide
@@ -111,7 +117,7 @@ func cmdInstall(ctx context.Context, args []string) error {
 	php := fs.String("php", "8.4,8.3", "comma-separated PHP versions to install")
 	binDir := fs.String("bin-dir", "", "directory holding the opanel binaries (default: alongside opanelctl)")
 	skipFW := fs.Bool("skip-firewall", false, "leave nftables alone")
-	ws := fs.String("webserver", backends.Default, "webserver to install: apache, ols")
+	ws := fs.String("webserver", backends.Default, "webserver to install: apache, lsws")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -658,7 +664,7 @@ func createUser(ctx context.Context, username string, role auth.Role) error {
 // keep working when the panel is the thing that is broken.
 func cmdCloudLinux(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("cloudlinux: want 'install' or 'cpapi <script>'")
+		return errors.New("cloudlinux: want 'setup', 'install' or 'cpapi <script>'")
 	}
 	switch args[0] {
 	case "install":
@@ -688,9 +694,98 @@ func cmdCloudLinux(ctx context.Context, args []string) error {
 		}
 		return api.Run(ctx, os.Stdout, args[1], args[2:])
 
+	case "setup":
+		return cloudLinuxSetup(ctx, args[1:])
+
 	default:
 		return fmt.Errorf("cloudlinux: unknown command %q", args[0])
 	}
+}
+
+// cloudLinuxSetup brings a converted host the rest of the way, in one
+// command.
+//
+// This is the step between "CloudLinux is installed" and "the panel is
+// running sites on it", and it is a command rather than a page because it is
+// the only part of the sequence an operator runs once and never again. Each
+// piece is idempotent, so a run that fails partway is resumed by running it
+// again rather than unpicked.
+//
+// The order is not arbitrary. The integration has to exist before the Manager
+// is installed, because the vendor's installer reads base_path out of it. PHP
+// Selector needs CageFS, which the wizard or cagefsctl has already set up.
+// And the migration to alt-php goes last, because it is the only step that
+// touches running sites.
+func cloudLinuxSetup(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("cloudlinux setup", flag.ContinueOnError)
+	skipSelector := fs.Bool("skip-selector", false, "do not install alt-php or set up PHP Selector")
+	skipManager := fs.Bool("skip-manager", false, "do not install CloudLinux Manager")
+	stay := fs.Bool("stay-on-remi", false, "leave sites on Remi's PHP instead of moving them to alt-php")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if !cloudlinux.Detected() {
+		return errors.New("cloudlinux setup: this host is not running CloudLinux.\n" +
+			"Convert it first with cldeploy, reboot, then run this again.")
+	}
+
+	cfg, database, err := openDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+	ac := agentclient.New(cfg.AgentSocket, actions.PHPProviderBudget+time.Minute)
+
+	fmt.Println("==> Integration")
+	if _, err := agentclient.Call[actions.CLStatus](ctx, ac, "cl.install_integration", 1, struct{}{}); err != nil {
+		return fmt.Errorf("install the integration: %w", err)
+	}
+	fmt.Println("    CloudLinux's tools can read this panel's accounts, domains and packages.")
+
+	if !*skipSelector {
+		fmt.Println("==> alt-php and PHP Selector (this installs about 2 GB and takes a few minutes)")
+		st, err := agentclient.Call[cloudlinux.SelectorStatus](ctx, ac, "cl.selector_setup", 1, struct{}{})
+		if err != nil {
+			return fmt.Errorf("set up PHP Selector: %w", err)
+		}
+		fmt.Printf("    %d interpreter(s) available: %s\n", len(st.Versions), strings.Join(st.Versions, " "))
+	}
+
+	if !*skipManager {
+		fmt.Println("==> CloudLinux Manager")
+		if _, err := agentclient.Call[actions.CLStatus](ctx, ac, "cl.manager_install", 1, struct{}{}); err != nil {
+			return fmt.Errorf("install CloudLinux Manager: %w", err)
+		}
+		fmt.Println("    Served inside the panel at /lvemanager, behind the panel's own session.")
+	}
+
+	// nil limits and nil logger: this is the operator at a shell rather than
+	// a reseller spending an allowance, and the service treats both as
+	// optional.
+	svc := sites.New(database, ac, webserver.DefaultServerConfig(), nil, nil)
+
+	// Every site moves onto CloudLinux's PHP. Last, and separately reported,
+	// because it is the step that touches what visitors are being served.
+	if !*stay {
+		fmt.Println("==> Moving sites to alt-php")
+		res, err := svc.SetPHPProvider(ctx, phpmgr.ProviderAltPHP)
+		if err != nil {
+			return fmt.Errorf("move sites to alt-php: %w", err)
+		}
+		fmt.Printf("    %d site(s) moved from %s to %s.\n", res.Migrated, res.Previous, res.Provider)
+	}
+
+	// The webserver is re-rendered whatever happened above: the Manager's
+	// vhost and the LiteSpeed handlers only appear on a render that runs
+	// after the things they describe exist.
+	if err := svc.SyncWebserver(ctx); err != nil {
+		return fmt.Errorf("apply the webserver configuration: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Done. Sites run on CloudLinux's PHP, and LiteSpeed Enterprise can now be")
+	fmt.Println("installed: every PHP vhost already carries a handler it can use.")
+	return nil
 }
 
 // panelURL is where CloudLinux should send somebody who wants to sign in.

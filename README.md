@@ -37,6 +37,23 @@ that runs arbitrary input as root, and the list of actions is compiled in.
 - A domain name pointed at the server, if you want a trusted certificate on
   the panel itself — and you do, because passkeys will not work without one
 
+If you are going on to CloudLinux, **disk is the binding constraint, not
+CPU**. Measured on a converted host before a single customer file existed:
+
+| | |
+|---|---|
+| CageFS skeleton | 3.4 GB |
+| alt-php, all fifteen versions | 2.4 GB |
+| LiteSpeed Enterprise | ~0.2 GB |
+| **before any site** | **~6 GB** |
+
+CPU is the opposite. The three CloudLinux daemons sit at 0.0% and hold about
+150 MB between them; LVE is a kernel module, so it caps a customer's CPU
+rather than consuming any. Size the disk for what you will sell — it is the
+part that cannot be grown later without rebuilding — and the RAM and cores
+against the LVE package you intend to sell, which is arithmetic you can do
+from its `PMEM` and `SPEED`.
+
 ## Install
 
 One file, on a freshly installed AlmaLinux 10, as root:
@@ -89,6 +106,92 @@ Useful flags:
 ```
 
 Then open `https://<server>:2222` and sign in with the printed password.
+
+### CloudLinux, and LiteSpeed Enterprise
+
+The panel installs on plain AlmaLinux 10 and works there. CloudLinux is what
+turns it into something you can sell shared hosting on — LVE limits, CageFS,
+HardenedPHP on versions long past end of life — and LiteSpeed Enterprise is
+what makes it fast. They go on in that order, and the order is not a
+preference: each step is what makes the next one possible.
+
+Run the stages in sequence. Stage 2 reboots, which is why it cannot be folded
+into the others.
+
+**1. The panel, on AlmaLinux 10.** As above. Apache, PHP-FPM from Remi, PHP
+8.4 by default. Get a site working here before going further: everything
+after this changes the PHP underneath a running panel, and a panel that was
+not working first gives you two problems to tell apart.
+
+**2. Convert to CloudLinux.** Their tool, not ours — CloudLinux 10 has no
+installer image, only a conversion of a running AlmaLinux:
+
+```bash
+curl -O https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy
+bash cldeploy --precheck            # look before you leap
+bash cldeploy -k <YOUR-LICENCE-KEY>
+reboot
+```
+
+Note that `/etc/os-release` still says AlmaLinux afterwards: CloudLinux 10
+runs as a subsystem rather than as its own distribution. `cldetect
+--detect-os` is the honest answer, and it is what the panel asks.
+
+**3. Bring the host the rest of the way.** One command, idempotent, safe to
+re-run:
+
+```bash
+opanelctl cloudlinux setup
+```
+
+It does four things, in an order that matters:
+
+| | |
+|---|---|
+| Integration | writes `/opt/cpvendor/etc/integration.ini` and the programs it names, so CloudLinux's own tools can read this panel's accounts, domains and packages |
+| alt-php + PHP Selector | `dnf group install alt-php`, then `cagefsctl --setup-cl-selector` and `--force-update`. About 2 GB, a few minutes, fifteen interpreters from 5.3 to 8.5 |
+| CloudLinux Manager | installed and served **inside the panel** at `/lvemanager`, behind the panel's own session, with no second login |
+| Sites onto alt-php | every site's pool is rewritten against `/opt/alt`, the vhosts re-rendered onto the new sockets, and only then the old pools pruned |
+
+`--skip-selector`, `--skip-manager` and `--stay-on-remi` each turn one off.
+
+There is a second route for the middle two: CloudLinux ships its own
+installation wizard, and it works here — it is a tab inside the Manager the
+panel serves, so the panel page and the wizard reach the same place. The
+command exists because it can be scripted and the wizard cannot.
+
+After this, sites run on CloudLinux's PHP. That is the state LiteSpeed needs.
+
+**4. LiteSpeed Enterprise.** Install it with `control panel: None`, then
+switch to it from the panel's Webserver page, or:
+
+```bash
+opanelctl agent actions | grep webserver   # it is the API the page calls
+```
+
+Why stage 3 has to come first, measured on CloudLinux 10 with LiteSpeed
+Enterprise 6.3.3 rather than taken from documentation:
+
+| Vhost | What LiteSpeed does |
+|---|---|
+| Apache's PHP-FPM handler alone | runs the `lsphp` **it** ships with — 7.2.34 — and answers 200 |
+| plus `AddHandler application/x-httpd-alt-php84` | runs alt-php 8.4.25, as the site's own user |
+| handler naming a version that is not installed | 403 |
+
+So a host that switches to LiteSpeed without stage 3 does not break loudly.
+It serves every site on an interpreter from 2019 and reports success. The
+panel refuses that switch and says which sites are the problem.
+
+Every PHP vhost the panel writes carries **both** handlers: Apache's, and
+inside `<IfModule LiteSpeed>` one LiteSpeed understands. Apache has no module
+of that name and skips the block entirely. That is what makes switching
+server a daemon starting rather than a re-render of the estate.
+
+**Not built yet:** the offset-port arrangement that fails over to Apache
+automatically when LiteSpeed stops. The configuration it needs is already on
+disk — that is what the two-handler vhost is for — but the watchdog, the
+health check and the hysteresis that stop it flapping are not written. Today
+the switch is a button.
 
 ### A certificate for the panel
 

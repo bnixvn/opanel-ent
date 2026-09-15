@@ -23,6 +23,14 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// Detected reports whether this host is running CloudLinux at all.
+//
+// cldetect, not /etc/os-release. A converted host keeps saying AlmaLinux
+// there -- CloudLinux 10 runs as a subsystem rather than as its own
+// distribution -- so the only honest answer comes from their own tool being
+// present.
+func Detected() bool { return fileExists("/usr/bin/cldetect") }
+
 // Installed reports whether the integration file is in place.
 func Installed() bool {
 	st, err := os.Stat(ConfigPath)
