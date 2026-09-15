@@ -178,6 +178,14 @@ with quarantine, two-factor authentication and passkeys.
 websites, databases and disk. Disk is enforced by the filesystem, not by the
 panel asking nicely.
 
+**CloudLinux**, when the host has been converted to it. LVE limits set per
+package and per account, CloudLinux's own integration scripts answered so
+their tools can read this panel, PHP Selector set up, and **CloudLinux
+Manager served inside the panel** -- its own Current Usage, Users,
+Statistics, Options, Packages and Selector tabs, behind the panel's session
+and with no second login. The vendor's alternative is a service on a port of
+its own that asks for a system password; the panel does not use it.
+
 ## Repository layout
 
 ```

@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
+	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/db"
 )
 
@@ -24,7 +26,12 @@ func (s *Server) handleCloudLinux(w http.ResponseWriter, r *http.Request) {
 	}
 	body := map[string]any{"status": status}
 
-	if !status.Installed {
+	// The limits table and the usage figures are two more shell-outs, one of
+	// them an lveinfo query over a period, and CloudLinux Manager shows both
+	// better than a page of ours could. So they are asked for rather than
+	// gathered: a caller that wants them says so, and the page that only
+	// needs the status strip does not pay for them on every load.
+	if !status.Installed || r.URL.Query().Get("detail") != "1" {
 		writeJSON(w, http.StatusOK, body)
 		return
 	}
@@ -89,6 +96,7 @@ func (s *Server) handleCloudLinuxIntegration(w http.ResponseWriter, r *http.Requ
 // -- the first one would say "installed but not running", which is what the
 // page shows when it wants to offer the install button again.
 func (s *Server) handleCloudLinuxManagerInstall(w http.ResponseWriter, r *http.Request) {
+	allowLongResponse(w, 20*time.Minute)
 	ctx := r.Context()
 	if _, err := agentclient.Call[actions.CLStatus](ctx, s.agent,
 		"cl.manager_install", 1, struct{}{}); err != nil {
@@ -108,4 +116,23 @@ func (s *Server) handleCloudLinuxManagerInstall(w http.ResponseWriter, r *http.R
 	}
 	s.audit(r, "cloudlinux.manager", "install", true, "")
 	writeJSON(w, http.StatusOK, status)
+}
+
+// handleCloudLinuxSelectorSetup installs the alt-php interpreters and
+// registers them with PHP Selector.
+//
+// Minutes rather than seconds: about two gigabytes of packages, then a
+// rebuild of the CageFS skeleton around them. The agent action carries its
+// own budget for that; this handler only has to not give up first.
+func (s *Server) handleCloudLinuxSelectorSetup(w http.ResponseWriter, r *http.Request) {
+	allowLongResponse(w, 45*time.Minute)
+	st, err := agentclient.Call[cloudlinux.SelectorStatus](r.Context(), s.agent,
+		"cl.selector_setup", 1, struct{}{})
+	if err != nil {
+		s.audit(r, "cloudlinux.selector", "setup", false, err.Error())
+		s.agentError(w, err)
+		return
+	}
+	s.audit(r, "cloudlinux.selector", "setup", true, "")
+	writeJSON(w, http.StatusOK, st)
 }

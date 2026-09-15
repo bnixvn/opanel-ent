@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
@@ -44,6 +45,10 @@ func (s *Server) handleWebserverSwitch(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	// A switch renders every site, writes every pool, and hands the ports
+	// from one daemon to another. On a host with a few hundred sites that is
+	// minutes, and the agent's own budget for it is fifteen.
+	allowLongResponse(w, actions.SwitchBudget+time.Minute)
 	res, err := s.sites.SwitchWebserver(r.Context(), body.Backend)
 	if err != nil {
 		s.agentError(w, err)

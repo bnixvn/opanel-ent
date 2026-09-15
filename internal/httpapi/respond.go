@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 // errorBody is the single error shape every endpoint returns, so clients can
@@ -42,4 +43,24 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// allowLongResponse lifts the server's write deadline for one request.
+//
+// The server sets WriteTimeout so a client cannot hold a connection open
+// while the response trickles out. That deadline is absolute from the start
+// of the request, though, so it also bounds how long a handler may take --
+// and a few of them legitimately take minutes: installing two gigabytes of
+// interpreters, rebuilding the CageFS skeleton, switching webserver across
+// every site on the host. Those would be cut off mid-work with the client
+// told the connection failed, which is the worst way to learn that a switch
+// is halfway done.
+//
+// Per-request rather than a larger WriteTimeout for everybody: the timeout is
+// doing a real job on the several hundred handlers that answer in
+// milliseconds, and only the handful that cannot should be exempt.
+func allowLongResponse(w http.ResponseWriter, d time.Duration) {
+	// Best effort. If the writer does not support it the request still runs;
+	// it just keeps the server's own deadline.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
 }

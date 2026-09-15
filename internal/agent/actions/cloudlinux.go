@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
+	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
 )
 
@@ -43,6 +44,11 @@ type CLStatus struct {
 	// installed-and-stopped is a real state and looks like neither.
 	Manager        bool `json:"manager"`
 	ManagerRunning bool `json:"manager_running"`
+	// Selector is what PHP Selector currently offers. Part of the status
+	// rather than a page of its own: "which PHP versions can a customer
+	// choose?" is a fact about this host, and the answer is usually "none
+	// yet", which is a thing the page has to be able to say.
+	Selector cloudlinux.SelectorStatus `json:"selector"`
 	// Tools reports which parts are installed, so the page can say why
 	// something is missing rather than leaving a blank.
 	Tools map[string]bool `json:"tools"`
@@ -151,6 +157,25 @@ func registerCloudLinux(r *agent.Registry) {
 			return clStatus(ctx), nil
 		})
 
+	// Slow, and by a wide margin the slowest thing on this page: it installs
+	// about two gigabytes of interpreters and then rebuilds the CageFS
+	// skeleton around them.
+	agent.RegisterSlow(r, "cl.selector_setup", 1, 40*time.Minute,
+		func(ctx context.Context, _ struct{}) (cloudlinux.SelectorStatus, error) {
+			if !fileExists(clDetect) {
+				return cloudlinux.SelectorStatus{}, &agent.DeniedError{
+					Reason: "CloudLinux is not installed on this server",
+				}
+			}
+			err := cloudlinux.SetupSelector(ctx, func(ctx context.Context, group string) error {
+				return pkgmgr.InstallGroup(ctx, group)
+			})
+			if err != nil {
+				return cloudlinux.SelectorStatus{}, err
+			}
+			return cloudlinux.SelectorState(ctx), nil
+		})
+
 	agent.Register(r, "cl.install_integration", 1, func(ctx context.Context, _ struct{}) (CLStatus, error) {
 		if !fileExists(clDetect) {
 			return CLStatus{}, &agent.DeniedError{Reason: "CloudLinux is not installed on this server"}
@@ -178,6 +203,7 @@ func clStatus(ctx context.Context) CLStatus {
 	if !out.Tools["cldetect"] {
 		return out
 	}
+	out.Selector = cloudlinux.SelectorState(ctx)
 	out.Installed = true
 	out.OS = firstLineOf(ctx, clDetect, "--detect-os")
 	out.Edition = firstLineOf(ctx, clDetect, "--detect-edition")

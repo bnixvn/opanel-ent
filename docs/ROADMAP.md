@@ -14,9 +14,22 @@ This stage has to be solid before the next one starts: everything after it
 changes the PHP underneath a working panel, and a panel that was not working
 first gives you two problems to tell apart.
 
-**2. CloudLinux.** Converted from AlmaLinux with `cldeploy`, which reboots
-partway, so the installer for it is two steps. Brings CageFS, LVE limits and
-MySQL Governor, none of which the panel drives yet.
+**2. CloudLinux.** Done. Converted from AlmaLinux with `cldeploy`, which
+reboots partway, so the installer for it is two steps. The panel now drives
+LVE limits per package and per user, answers CloudLinux's own integration
+scripts, serves CloudLinux Manager behind the panel session, and sets up PHP
+Selector. MySQL Governor is still untouched.
+
+The Manager is worth a note because the wrong choice here is easy to make and
+looks like it works. CloudLinux ships two ways to serve it, and
+`run_service = 1` -- the obvious one -- starts a service that authenticates
+with PAM: a second login, for a system account, inside a page the panel has
+already signed somebody in for. The other way is what the `lvemanager_config`
+section is for: the panel serves the files and answers "who is asking?"
+through `ui_user_info`, with `vendor.php` refusing anything that cannot prove
+it came through the panel. Two things their documentation gets wrong for
+CloudLinux 10: the domain field is `userDomain`, not `defaultDomain`, and
+`post_modify_admin.py create` takes `--name`, not `--username`.
 
 **3. alt-php in place of PHP-FPM.** CloudLinux's PHP, with the version picker
 in the panel pointing at it. Apache runs it through `mod_lsapi`. This is a

@@ -2,24 +2,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Card, Empty, Message, Tag, useMessage } from '../components.jsx';
 
-const PERIODS = [
-  ['5m', 'last 5 minutes'],
-  ['4h', 'last 4 hours'],
-  ['1d', 'last 24 hours'],
-  ['7d', 'last 7 days'],
-];
-
 export default function CloudLinux() {
   const [state, setState] = useState(null);
-  const [period, setPeriod] = useState('1d');
   const [busy, setBusy] = useState(false);
   const msg = useMessage();
 
-  const load = useCallback((p) => {
-    api.get(`/cloudlinux?period=${encodeURIComponent(p)}`).then(setState).catch(msg.fail);
+  const load = useCallback(() => {
+    api.get('/cloudlinux').then(setState).catch(msg.fail);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(period); }, [load, period]);
+  useEffect(() => { load(); }, [load]);
 
   async function installManager() {
     msg.clear();
@@ -31,7 +23,20 @@ export default function CloudLinux() {
       msg.fail(err);
     }
     setBusy(false);
-    load(period);
+    load();
+  }
+
+  async function setupSelector() {
+    msg.clear();
+    setBusy(true);
+    try {
+      await api.post('/cloudlinux/selector', {});
+      msg.ok('PHP Selector can now offer every alt-php version installed here.');
+    } catch (err) {
+      msg.fail(err);
+    }
+    setBusy(false);
+    load();
   }
 
   async function installIntegration() {
@@ -44,7 +49,7 @@ export default function CloudLinux() {
       msg.fail(err);
     }
     setBusy(false);
-    load(period);
+    load();
   }
 
   const st = state?.status;
@@ -130,6 +135,42 @@ export default function CloudLinux() {
         </Card>
       )}
 
+      {state && st?.installed && (
+        <Card title="PHP Selector">
+          <p className="muted">
+            The versions a customer can choose for themselves, from
+            CloudLinux's own alt-php builds. Separate from the version a site
+            runs, which the panel sets per site: this is the interpreter inside
+            the customer's own shell and cron. Setting it up installs every
+            alt-php CloudLinux ships (about 2&nbsp;GB) and rebuilds the CageFS
+            skeleton around them, which takes a few minutes.
+          </p>
+          <dl className="kv">
+            <dt>Offers</dt>
+            <dd>
+              {st.selector?.versions?.length
+                ? st.selector.versions.join(', ')
+                : <Tag kind="bad">nothing yet</Tag>}
+            </dd>
+            <dt>Native</dt>
+            <dd>
+              {st.selector?.native
+                ? <code>{st.selector.native}</code>
+                : <Tag kind="bad">not declared</Tag>}
+            </dd>
+          </dl>
+          <button type="button" disabled={busy || !st.selector?.available} onClick={setupSelector}>
+            {busy ? 'Working…' : (st.selector?.versions?.length ? 'Install the rest' : 'Set it up')}
+          </button>
+          {!st.selector?.available && (
+            <p className="muted">
+              CageFS has to be installed first: the selector works by giving
+              each customer a different interpreter inside their own cage.
+            </p>
+          )}
+        </Card>
+      )}
+
       {state && st && (
         <Card title="Components">
           <p className="muted">
@@ -149,15 +190,4 @@ export default function CloudLinux() {
       )}
     </>
   );
-}
-
-function pct(v) {
-  if (!v && v !== 0) return '—';
-  return `${Math.round(v)}%`;
-}
-
-function mb(bytes) {
-  if (!bytes) return '—';
-  const m = bytes / 1024 / 1024;
-  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
 }

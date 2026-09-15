@@ -107,6 +107,23 @@ func Install(ctx context.Context, names ...string) error {
 	return err
 }
 
+// InstallGroup adds a package group.
+//
+// Separate from Install because dnf treats a group as a different kind of
+// argument: "dnf install alt-php" finds a package of that name or nothing,
+// and the interpreters CloudLinux ships are only reachable as a group.
+//
+// Weak dependencies are allowed here, unlike Install. A group is a curated
+// set whose recommendations are the extensions that make its members useful;
+// installing PHP without them produces interpreters that cannot run anything.
+func InstallGroup(ctx context.Context, name string) error {
+	if !ValidName(name) {
+		return fmt.Errorf("pkgmgr: invalid group name %q", name)
+	}
+	_, err := run.Cmd(ctx, []string{dnf, "group", "install", "-y", name}, run.Timeout(installTimeout))
+	return err
+}
+
 // urlPattern accepts an https URL to an rpm and nothing else.
 //
 // Installing by URL is how a repository definition arrives, and it is the one
