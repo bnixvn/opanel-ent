@@ -200,10 +200,23 @@ opanelctl cert issue panel.example.com you@example.com --panel
 ```
 
 `--panel` points the panel's own TLS at the certificate it just obtained, and
-records the name as the one the panel answers to. Until you do this the panel
-serves a self-signed certificate, which browsers accept grudgingly and
-passkeys refuse outright. The email is optional; without one Let's Encrypt
-cannot warn you before the certificate expires.
+records the name as the one the panel answers to. The email is optional;
+without one Let's Encrypt cannot warn you before the certificate expires.
+
+Two things have to be true first, and both are outside the panel:
+
+- the hostname resolves to this server — Let's Encrypt proves it by fetching
+  a file over HTTP, so the name has to point here before you ask;
+- port 80 is reachable from the internet, because that is where the
+  challenge arrives.
+
+Until you do this the panel serves a self-signed certificate. Browsers accept
+that grudgingly, and **passkeys refuse it outright** — WebAuthn requires a
+trusted origin, so the passkey features simply will not appear. That is the
+practical reason to bother rather than a theoretical one.
+
+Renewal is automatic once a certificate exists; the panel checks daily and
+renews what is close to expiry.
 
 ## Build from source
 

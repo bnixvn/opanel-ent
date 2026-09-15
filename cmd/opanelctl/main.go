@@ -159,25 +159,43 @@ func cmdInstall(ctx context.Context, args []string) error {
 	// A host that already has a certificate is usually one being upgraded,
 	// and telling that operator to go and fix a self-signed certificate they
 	// replaced months ago sends them looking for a problem that is not there.
-	host, certFile := "<server-ip>", ""
+	host, tls := panelAddress(ctx, cfg), "self-signed; see the README to replace it"
 	if names, err := database.ListPanelHostnames(ctx); err == nil && len(names) > 0 {
-		host, certFile = names[0].Hostname, names[0].CertFile
+		if names[0].CertFile != "" {
+			host, tls = names[0].Hostname, names[0].CertFile
+		}
 	}
 
 	fmt.Println()
 	fmt.Printf("Panel:  https://%s:%d\n", host, opts.PanelPort)
 	fmt.Printf("Config: %s/opanel.env\n", installer.ConfigDir)
 	fmt.Printf("Data:   %s\n", cfg.DataDir)
-	fmt.Println()
-	if certFile != "" {
-		fmt.Printf("TLS:    %s\n", certFile)
-	} else {
-		fmt.Println("The panel serves HTTPS with a self-signed certificate, so the first visit")
-		fmt.Println("shows a browser warning. Replace it with a real one once the hostname")
-		fmt.Println("resolves to this server:")
-		fmt.Println("  opanelctl cert issue --panel <hostname> <email>")
-	}
+	fmt.Printf("TLS:    %s\n", tls)
 	return nil
+}
+
+// panelAddress is the address to print as the one to open.
+//
+// The agent is asked rather than the database, because a fresh install has no
+// hostname recorded and printing the literal "<server-ip>" leaves the person
+// who most needs the answer -- somebody who has just installed this on a
+// server they may know only by their provider's console -- to go and find it.
+// A host with no global address falls back to the placeholder, which is at
+// least honest.
+func panelAddress(ctx context.Context, cfg *config.Config) string {
+	ac := agentclient.New(cfg.AgentSocket, 10*time.Second)
+	info, err := agentclient.Call[actions.NetworkInfo](ctx, ac, "net.info", 1, struct{}{})
+	if err != nil {
+		return "<server-ip>"
+	}
+	switch {
+	case info.PrimaryIPv4 != "":
+		return info.PrimaryIPv4
+	case info.PrimaryIPv6 != "":
+		return "[" + info.PrimaryIPv6 + "]"
+	default:
+		return "<server-ip>"
+	}
 }
 
 // splitFlags separates "-x"/"--x" arguments from positional ones, so a flag
