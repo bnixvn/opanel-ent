@@ -297,6 +297,8 @@ func (s *Server) routes() http.Handler {
 				ar.Delete("/php/versions/{version}", s.handlePHPUninstall)
 				ar.Put("/php/versions/{version}/settings", s.handlePHPSettingsSave)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
+				ar.Get("/cloudlinux", s.handleCloudLinux)
+				ar.Post("/cloudlinux/integration", s.handleCloudLinuxIntegration)
 				ar.Get("/webserver/backends", s.handleWebserverBackends)
 				ar.Post("/webserver/switch", s.handleWebserverSwitch)
 				ar.Post("/webserver/litespeed/install", s.handleLiteSpeedInstall)

@@ -19,6 +19,7 @@ import Packages from './pages/Packages.jsx';
 import Php from './pages/Php.jsx';
 import System from './pages/System.jsx';
 import Webserver from './pages/Webserver.jsx';
+import CloudLinux from './pages/CloudLinux.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -256,6 +257,7 @@ export default function App() {
                   <Route path="/php" element={<Php me={me} />} />
                   <Route path="/system" element={<System />} />
                   <Route path="/webserver" element={<Webserver />} />
+                  <Route path="/cloudlinux" element={<CloudLinux />} />
                   <Route path="/settings" element={<Settings />} />
                 </>
               )}

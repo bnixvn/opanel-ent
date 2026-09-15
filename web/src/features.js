@@ -31,6 +31,7 @@ export const FEATURES = [
       { to: '/security/waf', label: 'WAF', roles: ['admin'], icon: 'waf' },
       { to: '/php', label: 'PHP', roles: ['admin'], icon: 'php' },
       { to: '/webserver', label: 'Web server', roles: ['admin'], icon: 'webserver' },
+      { to: '/cloudlinux', label: 'CloudLinux', roles: ['admin'], icon: 'cloudlinux' },
       { to: '/system', label: 'System', roles: ['admin'], icon: 'system' },
       { to: '/settings', label: 'Settings', roles: ['admin'], icon: 'settings' },
     ],

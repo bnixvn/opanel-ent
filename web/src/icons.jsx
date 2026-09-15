@@ -107,6 +107,13 @@ const PATHS = {
       <path d="M15 7l5 5-5 5" />
     </>
   ),
+  cloudlinux: (
+    <>
+      <path d="M7 18h9.5a3.5 3.5 0 0 0 .5-6.96A5 5 0 0 0 7.5 9.5 3.5 3.5 0 0 0 7 18z" />
+      <path d="M12 12.5v4" />
+      <path d="M10 14.5l2-2 2 2" />
+    </>
+  ),
   webserver: (
     <>
       <rect x="3" y="4" width="18" height="6" rx="1.5" />
