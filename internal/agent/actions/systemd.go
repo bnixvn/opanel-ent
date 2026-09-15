@@ -15,9 +15,8 @@ import (
 // they can reach. Without it, a flaw anywhere in the API would let a caller
 // stop sshd or systemd-journald through a perfectly well-formed request.
 var managedUnits = []string{
-	"lshttpd",       // OpenLiteSpeed / LiteSpeed Enterprise
-	"lsws",          // alias of lshttpd
-	"openlitespeed", // alias of lshttpd
+	"httpd",   // Apache
+	"lshttpd", // LiteSpeed Enterprise, when a licence is installed
 	"mariadb",
 	"valkey",
 	"nftables",
@@ -26,6 +25,18 @@ var managedUnits = []string{
 	"sshd",
 	"crond",
 	"clamd@scan",
+	// One pool manager per PHP version. Listed rather than discovered
+	// because the allowlist is the point: it is what stops a flaw anywhere
+	// in the panel from reaching a unit nobody meant it to touch. A version
+	// that is not installed is skipped by systemd.list, so this costs
+	// nothing on a host that runs one of them.
+	"php74-php-fpm",
+	"php80-php-fpm",
+	"php81-php-fpm",
+	"php82-php-fpm",
+	"php83-php-fpm",
+	"php84-php-fpm",
+	"php85-php-fpm",
 }
 
 func unitAllowed(name string) bool { return slices.Contains(managedUnits, name) }

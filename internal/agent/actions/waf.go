@@ -2,7 +2,6 @@ package actions
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,17 +9,49 @@ import (
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
+	"github.com/bnixvn/opanel-ent/internal/webserver"
+	"github.com/bnixvn/opanel-ent/internal/webserver/backends"
 )
 
-// Where the WAF's own files live. Under the webserver's configuration
-// directory because that is what reads them.
-const (
-	wafDir       = "/usr/local/lsws/conf/opanel/waf"
-	wafRulesFile = wafDir + "/rules.conf"
-	wafAuditLog  = "/usr/local/lsws/logs/modsec_audit.log"
-	modSecModule = "/usr/local/lsws/modules/mod_security.so"
-)
+// wafLayout is where the engine and the panel's rules live. It follows the
+// server that reads them: Apache loads ModSecurity from the distribution's
+// module directory, LiteSpeed carries its own inside /usr/local/lsws.
+//
+// Resolved per call rather than fixed at startup, for the same reason the
+// backend is: an operator can switch server without restarting the agent, and
+// rules written into the other server's directory are rules nothing reads.
+type wafLayout struct {
+	Dir       string
+	RulesFile string
+	AuditLog  string
+	Module    string
+	// Package is what installs the engine on this server.
+	Package string
+}
+
+func wafPaths() wafLayout {
+	if backends.Active() == webserver.BackendLSWS {
+		const root = "/usr/local/lsws"
+		return wafLayout{
+			Dir:       root + "/conf/opanel/waf",
+			RulesFile: root + "/conf/opanel/waf/rules.conf",
+			AuditLog:  root + "/logs/modsec_audit.log",
+			Module:    root + "/modules/mod_security.so",
+			Package:   "ols-modsecurity",
+		}
+	}
+	return wafLayout{
+		Dir:       "/etc/httpd/opanel/waf",
+		RulesFile: "/etc/httpd/opanel/waf/rules.conf",
+		AuditLog:  "/var/log/httpd/modsec_audit.log",
+		// EPEL's build for httpd 2.4. The distribution's own package loads
+		// it; the panel only adds rules.
+		Module:  "/usr/lib64/httpd/modules/mod_security2.so",
+		Package: "mod_security",
+	}
+}
 
 // WAF modes.
 //
@@ -120,17 +151,17 @@ func registerWAF(r *agent.Registry) {
 
 func wafStatus() WAFStatus {
 	st := WAFStatus{}
-	if _, err := os.Stat(modSecModule); err == nil {
+	if _, err := os.Stat(wafPaths().Module); err == nil {
 		st.ModuleAvailable = true
 	}
-	if _, err := os.Stat(wafRulesFile); err != nil {
+	if _, err := os.Stat(wafPaths().RulesFile); err != nil {
 		return st
 	}
 	st.RulesInstalled = true
 	// Counted across the rule files rather than the one that includes them:
 	// rules.conf holds a handful of directives and an Include, so counting
 	// there reports zero rules on a fully installed rule set.
-	matches, _ := filepath.Glob(filepath.Join(wafDir, "rules", "*.conf"))
+	matches, _ := filepath.Glob(filepath.Join(wafPaths().Dir, "rules", "*.conf"))
 	for _, path := range matches {
 		if body, err := os.ReadFile(path); err == nil {
 			st.RuleCount += strings.Count(string(body), "SecRule ")
@@ -139,7 +170,7 @@ func wafStatus() WAFStatus {
 
 	// The CRS records its own version in a setup file; showing it means an
 	// operator can tell whether their rules are three years old.
-	if v, err := os.ReadFile(filepath.Join(wafDir, "crs-version")); err == nil {
+	if v, err := os.ReadFile(filepath.Join(wafPaths().Dir, "crs-version")); err == nil {
 		st.RulesVersion = strings.TrimSpace(string(v))
 	}
 	return st
@@ -150,10 +181,20 @@ const crsURL = "https://github.com/coreruleset/coreruleset/releases/download/v4.
 
 // installCRS downloads and unpacks the rule set.
 func installCRS(ctx context.Context) error {
-	if _, err := os.Stat(modSecModule); err != nil {
-		return errors.New("this webserver has no ModSecurity module, so there is nothing to configure")
+	paths := wafPaths()
+	if _, err := os.Stat(paths.Module); err != nil {
+		// Install the engine rather than refusing. It is a package on both
+		// servers, and "install the web application firewall" plainly means
+		// the engine as well as the rules -- being told to go and run dnf
+		// first is a step that exists only because nobody wrote it down.
+		if err := pkgmgr.Install(ctx, paths.Package); err != nil {
+			return fmt.Errorf("install %s, the ModSecurity engine: %w", paths.Package, err)
+		}
+		if _, err := os.Stat(paths.Module); err != nil {
+			return fmt.Errorf("%s installed but %s is not there", paths.Package, paths.Module)
+		}
 	}
-	if err := os.MkdirAll(wafDir, 0o755); err != nil {
+	if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
 		return err
 	}
 
@@ -178,17 +219,17 @@ func installCRS(ctx context.Context) error {
 	// Only the rules directory and the setup example are wanted; the rest of
 	// the release is documentation and tests.
 	if _, err := run.Cmd(ctx, []string{
-		"cp", "-a", filepath.Join(tmp, "rules"), wafDir + "/",
+		"cp", "-a", filepath.Join(tmp, "rules"), wafPaths().Dir + "/",
 	}, run.Timeout(time.Minute)); err != nil {
 		return fmt.Errorf("install the rules: %w", err)
 	}
 	setup := filepath.Join(tmp, "crs-setup.conf.example")
 	if _, err := os.Stat(setup); err == nil {
-		if _, err := run.Cmd(ctx, []string{"cp", setup, filepath.Join(wafDir, "crs-setup.conf")}); err != nil {
+		if _, err := run.Cmd(ctx, []string{"cp", setup, filepath.Join(wafPaths().Dir, "crs-setup.conf")}); err != nil {
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(wafDir, "crs-version"), []byte("4.7.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(wafPaths().Dir, "crs-version"), []byte("4.7.0\n"), 0o644); err != nil {
 		return err
 	}
 	return writeWAFConfig(WAFConfigureRequest{Mode: WAFDetectOnly})
@@ -196,7 +237,7 @@ func installCRS(ctx context.Context) error {
 
 // writeWAFConfig renders the file every protected vhost includes.
 func writeWAFConfig(in WAFConfigureRequest) error {
-	if err := os.MkdirAll(wafDir, 0o755); err != nil {
+	if err := os.MkdirAll(wafPaths().Dir, 0o755); err != nil {
 		return err
 	}
 	// Written before the rules are rendered: wafIncludeLines reads this to
@@ -225,13 +266,13 @@ func writeWAFConfig(in WAFConfigureRequest) error {
 	b.WriteString("SecResponseBodyAccess Off\n")
 	b.WriteString("SecAuditEngine RelevantOnly\n")
 	b.WriteString("SecAuditLogParts ABIJDEFHZ\n")
-	fmt.Fprintf(&b, "SecAuditLog %s\n", wafAuditLog)
+	fmt.Fprintf(&b, "SecAuditLog %s\n", wafPaths().AuditLog)
 	b.WriteString("SecAuditLogType Serial\n")
 	b.WriteString("SecTmpDir /tmp\n")
 	b.WriteString("SecDataDir /tmp\n\n")
 
-	if _, err := os.Stat(filepath.Join(wafDir, "crs-setup.conf")); err == nil {
-		fmt.Fprintf(&b, "Include %s/crs-setup.conf\n", wafDir)
+	if _, err := os.Stat(filepath.Join(wafPaths().Dir, "crs-setup.conf")); err == nil {
+		fmt.Fprintf(&b, "Include %s/crs-setup.conf\n", wafPaths().Dir)
 	}
 	b.WriteString(wafIncludeLines())
 
@@ -241,7 +282,7 @@ func writeWAFConfig(in WAFConfigureRequest) error {
 			fmt.Fprintf(&b, "SecRuleRemoveById %s\n", id)
 		}
 	}
-	return os.WriteFile(wafRulesFile, []byte(b.String()), 0o644)
+	return os.WriteFile(wafPaths().RulesFile, []byte(b.String()), 0o644)
 }
 
 // readWAFEvents pulls the recent entries out of the audit log.
@@ -250,7 +291,7 @@ func writeWAFConfig(in WAFConfigureRequest) error {
 // Only a few fields matter for the panel's purpose -- who, what, which rule
 // -- so this reads those rather than modelling the whole format.
 func readWAFEvents(limit int) []WAFEvent {
-	f, err := os.Open(wafAuditLog)
+	f, err := os.Open(wafPaths().AuditLog)
 	if err != nil {
 		return nil
 	}

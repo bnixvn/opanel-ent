@@ -119,7 +119,6 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 	if st := pmaStatus(); st.Installed {
 		cfg.PMARoot = st.Root
 		cfg.PMAPort = PMAPort
-		cfg.PMALSAPIBinary = provider.LSAPIBinary(PMAPHPVersion)
 		if fp, ok := provider.(phpmgr.FPMProvider); ok {
 			cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
 		}

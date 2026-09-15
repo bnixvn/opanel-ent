@@ -135,21 +135,6 @@ func TestPHPSiteAlwaysGetsAHandler(t *testing.T) {
 	}
 }
 
-// Rendering for Apache a site that was resolved for LiteSpeed's interpreter
-// must fail rather than produce a vhost with no PHP in it.
-func TestRefusesSiteResolvedForLiteSpeed(t *testing.T) {
-	s := testSite("example.com", "bob", webserver.AppPHP, "8.3")
-	s.FPMSocket = ""
-	s.LSAPIBinary = "/usr/local/lsws/lsphp83/bin/lsphp"
-	b, err := New()
-	if err != nil {
-		t.Fatalf("new backend: %v", err)
-	}
-	if _, err := b.Render(webserver.DefaultServerConfig(), []webserver.Site{s}); err == nil {
-		t.Fatal("rendered an lsapi site into an Apache vhost")
-	}
-}
-
 func TestRefusesDuplicateHostname(t *testing.T) {
 	a := testSite("example.com", "bob", webserver.AppPHP, "8.3")
 	b2 := testSite("other.example.com", "carol", webserver.AppPHP, "8.3")

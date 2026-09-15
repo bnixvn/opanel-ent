@@ -56,7 +56,6 @@ export default function Webserver() {
   }
 
   const lsws = state?.litespeed || {};
-  const lswsBackend = (state?.backends || []).find((b) => b.name === 'lsws');
 
   return (
     <>
@@ -121,12 +120,6 @@ export default function Webserver() {
                 Reads the same configuration Apache does, so switching to it
                 moves no files and switching back is just as quick.
               </p>
-              {lswsBackend && !lswsBackend.installed && state.backends.some((b) => b.name === 'ols' && b.installed) && (
-                <p className="muted">
-                  OpenLiteSpeed is installed in the same directory
-                  (<code>/usr/local/lsws</code>) and has to be removed first.
-                </p>
-              )}
               <div className="row">
                 <input
                   type="text"

@@ -11,9 +11,8 @@ use serde_json::json;
 /// "restart any unit you can name" is a different grant from "restart the
 /// web server", and only the second one is wanted here.
 const MANAGED_UNITS: &[&str] = &[
+    "httpd",
     "lshttpd",
-    "lsws",
-    "openlitespeed",
     "mariadb",
     "valkey",
     "nftables",
@@ -22,6 +21,15 @@ const MANAGED_UNITS: &[&str] = &[
     "sshd",
     "crond",
     "clamd@scan",
+    // One pool manager per PHP version. Listed rather than discovered
+    // because the allowlist is the point.
+    "php74-php-fpm",
+    "php80-php-fpm",
+    "php81-php-fpm",
+    "php82-php-fpm",
+    "php83-php-fpm",
+    "php84-php-fpm",
+    "php85-php-fpm",
 ];
 
 /// Spelled the way the Go agent formats the same list, so a caller that
@@ -137,6 +145,7 @@ mod tests {
     #[test]
     fn only_managed_units_pass_validation() {
         assert!(UnitRequest { unit: "mariadb".into() }.validate().is_ok());
+        assert!(UnitRequest { unit: "php84-php-fpm".into() }.validate().is_ok());
         // Well-formed, real, and refused: the allowlist is what stops a flaw
         // anywhere in the panel from reaching systemd-journald or auditd.
         let err = UnitRequest { unit: "systemd-journald".into() }.validate().unwrap_err();

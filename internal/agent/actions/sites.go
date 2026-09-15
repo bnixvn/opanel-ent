@@ -243,14 +243,11 @@ func resolve(p phpmgr.Provider, specs []SiteSpec) ([]webserver.Site, error) {
 			s.PHPSettings = checked
 		}
 		if s.NeedsPHP() {
-			// Which of the two the site carries is decided by the provider,
-			// not by the caller: LiteSpeed spawns an interpreter and Apache
-			// proxies to a pool, and a site carrying the wrong one renders
-			// into a configuration that serves nothing.
+			// The provider decides how the server reaches PHP. One that is
+			// not pool-shaped would have to resolve something else here, and
+			// Site.Validate refuses a PHP site that ends up with nothing.
 			if fp, ok := p.(phpmgr.FPMProvider); ok {
 				s.FPMSocket = fp.SocketPath(sp.PHPVersion, sp.Domain)
-			} else {
-				s.LSAPIBinary = p.LSAPIBinary(sp.PHPVersion)
 			}
 		}
 		if err := s.Validate(); err != nil {
@@ -402,7 +399,6 @@ func registerSites(r *agent.Registry, deps Deps) {
 		if st := pmaStatus(); st.Installed {
 			cfg.PMARoot = st.Root
 			cfg.PMAPort = PMAPort
-			cfg.PMALSAPIBinary = provider.LSAPIBinary(PMAPHPVersion)
 			if fp, ok := provider.(phpmgr.FPMProvider); ok {
 				cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
 			}
@@ -624,13 +620,13 @@ func placeholderPage(domain string) []byte {
 // operator who has not installed the rules gets a working server rather than
 // a broken one.
 func wafRulesIfInstalled() string {
-	if _, err := os.Stat(modSecModule); err != nil {
+	if _, err := os.Stat(wafPaths().Module); err != nil {
 		return ""
 	}
-	if _, err := os.Stat(wafRulesFile); err != nil {
+	if _, err := os.Stat(wafPaths().RulesFile); err != nil {
 		return ""
 	}
-	return wafRulesFile
+	return wafPaths().RulesFile
 }
 
 // refuseUnmanaged stops the agent changing an account the panel did not make.

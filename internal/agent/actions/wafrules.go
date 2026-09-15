@@ -90,7 +90,7 @@ func registerWAFRules(r *agent.Registry) {
 
 // listWAFRules reads the installed rule files.
 func listWAFRules() []WAFRule {
-	dir := filepath.Join(wafDir, "rules")
+	dir := filepath.Join(wafPaths().Dir, "rules")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -157,7 +157,7 @@ func countSecRules(path string) int {
 
 // disabledRulesFile records which categories are off, so the list and the
 // rendered configuration agree after a restart.
-var disabledRulesFile = filepath.Join(wafDir, "disabled-rules")
+var disabledRulesFile = filepath.Join(wafPaths().Dir, "disabled-rules")
 
 func readDisabledWAFRules() map[string]bool {
 	out := map[string]bool{}
@@ -198,13 +198,13 @@ func wafIncludeLines() string {
 			b.WriteString("# switched off in the panel: " + r.File + "\n")
 			continue
 		}
-		b.WriteString("Include " + filepath.Join(wafDir, "rules", r.File) + "\n")
+		b.WriteString("Include " + filepath.Join(wafPaths().Dir, "rules", r.File) + "\n")
 	}
 	if b.Len() == 0 {
 		// No rule files at all: the glob is what the first install had, and
 		// falling back to it beats writing a configuration that protects
 		// nothing without saying so.
-		return "Include " + filepath.Join(wafDir, "rules", "*.conf") + "\n"
+		return "Include " + filepath.Join(wafPaths().Dir, "rules", "*.conf") + "\n"
 	}
 	return b.String()
 }

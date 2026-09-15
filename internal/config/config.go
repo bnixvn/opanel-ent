@@ -43,10 +43,14 @@ type Config struct {
 	SessionTTL     time.Duration
 	SessionIdleTTL time.Duration
 
-	// WebserverBackend selects the config renderer: "ols" or "lsws".
+	// WebserverBackend is only what the panel was configured with. The
+	// running server is whatever the agent reports, which is authoritative:
+	// an operator can switch webserver from the panel, and this file is not
+	// rewritten when they do. Kept as the fallback for the moment before the
+	// agent has answered.
 	WebserverBackend string
-	// PHPProvider selects the PHP source: "lsphp" or "altphp". Empty means
-	// autodetect (altphp when CloudLinux is present).
+	// PHPProvider selects the PHP source. Empty means the one that goes with
+	// the active webserver, which is the right answer on every host.
 	PHPProvider string
 
 	// ACMEEmail is the contact on the Let's Encrypt account. Optional, but
@@ -61,10 +65,12 @@ const (
 	EnvDev  = "dev"
 	EnvProd = "prod"
 
-	BackendOLS  = "ols"
-	BackendLSWS = "lsws"
+	BackendApache = "apache"
+	BackendOLS    = "ols"
+	BackendLSWS   = "lsws"
 
 	ProviderLSPHP  = "lsphp"
+	ProviderRemi   = "remi"
 	ProviderAltPHP = "altphp"
 )
 
@@ -78,7 +84,7 @@ func Load() (*Config, error) {
 		TLSCertFile:      env("OPANEL_TLS_CERT", ""),
 		TLSKeyFile:       env("OPANEL_TLS_KEY", ""),
 		PanelHost:        env("OPANEL_PANEL_HOST", ""),
-		WebserverBackend: env("OPANEL_WEBSERVER_BACKEND", BackendOLS),
+		WebserverBackend: env("OPANEL_WEBSERVER_BACKEND", BackendApache),
 		PHPProvider:      env("OPANEL_PHP_PROVIDER", ""),
 		ACMEEmail:        env("OPANEL_ACME_EMAIL", ""),
 		LogLevel:         env("OPANEL_LOG_LEVEL", "info"),
@@ -109,16 +115,16 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("OPANEL_ENV: want %q or %q, got %q", EnvDev, EnvProd, c.Env))
 	}
 	switch c.WebserverBackend {
-	case BackendOLS, BackendLSWS:
+	case BackendApache, BackendOLS, BackendLSWS:
 	default:
-		errs = append(errs, fmt.Errorf("OPANEL_WEBSERVER_BACKEND: want %q or %q, got %q",
-			BackendOLS, BackendLSWS, c.WebserverBackend))
+		errs = append(errs, fmt.Errorf("OPANEL_WEBSERVER_BACKEND: want %q, %q or %q, got %q",
+			BackendApache, BackendOLS, BackendLSWS, c.WebserverBackend))
 	}
 	switch c.PHPProvider {
-	case "", ProviderLSPHP, ProviderAltPHP:
+	case "", ProviderLSPHP, ProviderRemi, ProviderAltPHP:
 	default:
-		errs = append(errs, fmt.Errorf("OPANEL_PHP_PROVIDER: want %q, %q or empty, got %q",
-			ProviderLSPHP, ProviderAltPHP, c.PHPProvider))
+		errs = append(errs, fmt.Errorf("OPANEL_PHP_PROVIDER: want %q, %q, %q or empty, got %q",
+			ProviderLSPHP, ProviderRemi, ProviderAltPHP, c.PHPProvider))
 	}
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":

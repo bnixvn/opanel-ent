@@ -119,6 +119,20 @@
 {{- end }}
 {{- end }}
 
+{{- if and .Site.WAFEnabled (not .Site.Suspended) }}
+
+    # The firewall, switched on for this site. The rule set and the mode are
+    # server-wide; this only opts in.
+    <IfModule security2_module>
+        SecRuleEngine On
+    </IfModule>
+{{- else }}
+
+    <IfModule security2_module>
+        SecRuleEngine Off
+    </IfModule>
+{{- end }}
+
     <IfModule deflate_module>
         AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml
         AddOutputFilterByType DEFLATE text/javascript application/javascript

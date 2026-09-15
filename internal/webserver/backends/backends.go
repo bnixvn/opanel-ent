@@ -18,7 +18,6 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/webserver"
 	"github.com/bnixvn/opanel-ent/internal/webserver/apache"
-	"github.com/bnixvn/opanel-ent/internal/webserver/ols"
 )
 
 // StateFile records the active backend.
@@ -38,8 +37,6 @@ func New(name string) (webserver.Backend, error) {
 		return apache.New()
 	case webserver.BackendLSWS:
 		return apache.NewLiteSpeed()
-	case webserver.BackendOLS:
-		return ols.New()
 	default:
 		return nil, fmt.Errorf("webserver backend %q is not one of %v", name, webserver.Backends)
 	}
@@ -47,12 +44,11 @@ func New(name string) (webserver.Backend, error) {
 
 // Active returns the backend the host is set to run.
 //
-// A missing or unreadable state file is not an error -- the agent has to be
-// able to render a configuration on a host where somebody deleted it -- but
-// it is not simply the default either. A host installed before this file
-// existed is running OpenLiteSpeed, and answering "apache" there would make
-// the panel write Apache configuration for a host serving with something
-// else. So the fallback looks at what is actually on disk.
+// A state file that is missing, empty or unreadable gives the default rather
+// than an error: the agent must still be able to render a configuration on a
+// host where somebody deleted it, and both servers read the same
+// configuration anyway -- so the worst case of guessing wrong is a reload
+// aimed at the daemon that is not running, not a wrong set of files.
 func Active() string {
 	data, err := os.ReadFile(StateFile)
 	if err == nil {
@@ -60,17 +56,6 @@ func Active() string {
 		if slices.Contains(webserver.Backends, name) {
 			return name
 		}
-	}
-	return infer()
-}
-
-// infer guesses the backend of a host that never recorded one.
-//
-// Only reached on an upgrade from a build that predates the state file, where
-// the answer is always OpenLiteSpeed: it was the only backend there was.
-func infer() string {
-	if b, err := ols.New(); err == nil && b.Installed() {
-		return webserver.BackendOLS
 	}
 	return Default
 }
@@ -116,10 +101,6 @@ var labels = map[string][2]string{
 		"LiteSpeed Enterprise",
 		"Reads the same configuration as Apache and serves it faster. Needs a licence. " +
 			"Cannot yet run this panel's PHP pools, so hosts with PHP sites cannot switch to it.",
-	},
-	webserver.BackendOLS: {
-		"OpenLiteSpeed",
-		"Free, fast, and a configuration format of its own. Switching to it re-renders every site.",
 	},
 }
 

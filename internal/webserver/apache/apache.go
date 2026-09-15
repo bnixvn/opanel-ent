@@ -173,11 +173,6 @@ func (b *Backend) Render(cfg webserver.ServerConfig, sites []webserver.Site) (we
 		if err := sites[i].Validate(); err != nil {
 			return webserver.Rendered{}, fmt.Errorf("apache: site %q: %w", sites[i].Domain, err)
 		}
-		if sites[i].LSAPIBinary != "" {
-			return webserver.Rendered{}, fmt.Errorf(
-				"apache: site %q was resolved for LiteSpeed's interpreter, not a php-fpm pool",
-				sites[i].Domain)
-		}
 	}
 	if err := checkDuplicates(sites); err != nil {
 		return webserver.Rendered{}, err

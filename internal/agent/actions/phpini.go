@@ -13,6 +13,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
 // PHPIniRequest writes the panel's ini drop-in for one PHP version.
@@ -84,11 +85,24 @@ func writePHPIni(ctx context.Context, deps Deps, in PHPIniRequest) (PHPIniResult
 	}
 
 	// php.ini is read when an interpreter starts, so nothing changes until
-	// the external applications are restarted. Reported rather than assumed:
-	// a failure here means the file is right and the running processes are
-	// not, which the operator has to know.
+	// the interpreter is restarted -- and the interpreter is PHP-FPM, not the
+	// webserver. Reloading the webserver, which is what this used to do, left
+	// the file correct and every running process still on the old settings:
+	// the panel said the change was applied and phpinfo() disagreed.
+	//
+	// Reported rather than assumed, because a failure here means exactly that
+	// split, and the operator has to know which half is true.
 	reloaded := false
-	if ws, err := deps.Backend(); err == nil {
+	if fp, ok := deps.PHP().(phpmgr.FPMProvider); ok {
+		unit := fp.ServiceUnit(in.Version)
+		if st, err := svc.Get(ctx, unit); err == nil && st.Running() {
+			reloaded = svc.Restart(ctx, unit) == nil
+		} else {
+			// Not running means no process is holding the old settings, so
+			// the file on disk is the whole truth.
+			reloaded = true
+		}
+	} else if ws, err := deps.Backend(); err == nil {
 		reloaded = ws.Reload(ctx) == nil
 	}
 	return PHPIniResult{Path: path, Lines: len(checked), Reloaded: reloaded}, nil

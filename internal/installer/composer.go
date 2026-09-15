@@ -97,6 +97,7 @@ func newestPHP() string {
 	}
 	best := ""
 	for _, pattern := range []string{
+		"/opt/remi/php*/root/usr/bin/php",
 		"/usr/local/lsws/lsphp*/bin/php",
 		"/opt/alt/php*/usr/bin/php",
 	} {

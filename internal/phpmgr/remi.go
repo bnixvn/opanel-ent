@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
 )
@@ -51,6 +52,9 @@ var remiExtensions = []string{
 // the same reason.
 const FPMSocketDir = "/run/opanel-fpm"
 
+// pkgSuffix turns "8.4" into "84", the form the package names use.
+func pkgSuffix(version string) string { return strings.ReplaceAll(version, ".", "") }
+
 // Remi installs PHP-FPM from the Remi repository.
 //
 // The interpreter runs as a pool of its own processes owned by the site's
@@ -72,15 +76,6 @@ func (p *Remi) Supported() []string { return append([]string(nil), remiVersions.
 func (p *Remi) prefix(version string) string {
 	return filepath.Join(p.root, "php"+pkgSuffix(version))
 }
-
-// LSAPIBinary has no meaning for PHP-FPM and returns nothing.
-//
-// The method exists because Provider carries it, and the alternative --
-// splitting the interface so every caller has to ask which kind it holds --
-// pushes that question into a dozen places to spare one. Sites resolved
-// against this provider carry a socket instead; Site.Validate refuses one
-// that somehow carries neither.
-func (p *Remi) LSAPIBinary(string) string { return "" }
 
 // CLIBinary is the command-line interpreter for this version.
 func (p *Remi) CLIBinary(version string) string {

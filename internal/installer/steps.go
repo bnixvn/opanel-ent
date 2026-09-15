@@ -268,18 +268,6 @@ func stepBasePackages(ctx context.Context, _ *Options) error {
 	return nil
 }
 
-func stepLiteSpeedRepo(ctx context.Context, _ *Options) error {
-	// The vendor script is the only supported way to add this repository, and
-	// it picks the right EL major version itself.
-	res, err := run.Cmd(ctx, []string{"bash", "-c",
-		"curl -fsSL --connect-timeout 15 --max-time 180 https://repo.litespeed.sh | bash"},
-		run.Timeout(5*time.Minute))
-	if err != nil {
-		return fmt.Errorf("add LiteSpeed repository: %w (%s)", err, res.Output())
-	}
-	return nil
-}
-
 func checkWebserver(_ context.Context, o *Options) (bool, error) {
 	b, err := backends.New(o.Backend)
 	if err != nil {
@@ -288,37 +276,22 @@ func checkWebserver(_ context.Context, o *Options) (bool, error) {
 	return b.Installed(), nil
 }
 
-// stepInstallWebserver installs the server this host will run.
+// stepInstallWebserver installs Apache.
 //
-// Apache is the default, and the reason is not performance -- LiteSpeed beats
-// it -- but that LiteSpeed Enterprise reads Apache's configuration. Installing
-// Apache first means the panel's configuration is already in the format the
-// commercial server wants, so buying a licence later is a switch rather than a
-// migration.
-func stepInstallWebserver(ctx context.Context, o *Options) error {
-	switch o.Backend {
-	case webserver.BackendOLS:
-		if err := stepLiteSpeedRepo(ctx, o); err != nil {
-			return err
-		}
-		if err := pkgmgr.Install(ctx, "openlitespeed"); err != nil {
-			return err
-		}
-		// The package ships a demo vhost on port 8088 and starts it. The
-		// panel rewrites the configuration on its first apply, but until then
-		// leaving the demo listening is needless exposure.
-		return svc.Enable(ctx, "lshttpd", true)
-	default:
-		// mod_ssl alongside httpd: it carries the Listen for 443, and every
-		// site with a certificate renders a vhost that needs it.
-		if err := pkgmgr.Install(ctx, "httpd", "mod_ssl"); err != nil {
-			return err
-		}
-		// Started now rather than at the first site. A certificate for the
-		// panel itself is issued over HTTP-01 on port 80, and on a fresh host
-		// that happens before any site exists.
-		return svc.Enable(ctx, "httpd", true)
+// Apache is not the faster server. It is the one LiteSpeed Enterprise reads
+// the configuration of, so a host installed this way is already in the format
+// the commercial server wants: buying a licence later is a switch rather than
+// a migration.
+func stepInstallWebserver(ctx context.Context, _ *Options) error {
+	// mod_ssl alongside httpd: it carries the Listen for 443, and every site
+	// with a certificate renders a vhost that needs it.
+	if err := pkgmgr.Install(ctx, "httpd", "mod_ssl"); err != nil {
+		return err
 	}
+	// Started now rather than at the first site. A certificate for the panel
+	// itself is issued over HTTP-01 on port 80, and on a fresh host that
+	// happens before any site exists.
+	return svc.Enable(ctx, "httpd", true)
 }
 
 // stepWebserverConfig writes the panel's configuration for a host with no

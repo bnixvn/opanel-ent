@@ -53,9 +53,11 @@ const UnrestrictedPATH = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin"
 // searchPath is where a real copy of a command might live.
 var searchPath = []string{"/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin"}
 
-// phpGlobs are where an interpreter lives. lsphp today; alt-php when this
-// moves to CloudLinux.
+// phpGlobs are where an interpreter lives, in the order to prefer them.
+// Remi's tree is first because it is what an Apache host has; the LiteSpeed
+// and CloudLinux paths follow for hosts running those.
 var phpGlobs = []string{
+	"/opt/remi/php*/root/usr/bin/php",
 	"/usr/local/lsws/lsphp*/bin/php",
 	"/opt/alt/php*/usr/bin/php",
 }

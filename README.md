@@ -1,8 +1,15 @@
 # OPanel Enterprise
 
-Hosting control panel for **AlmaLinux 10**, built on **OpenLiteSpeed**, **LSPHP**
+Hosting control panel for **AlmaLinux 10**, built on **Apache**, **PHP-FPM**
 and **MariaDB**. Three static Go binaries and an embedded web interface: no
 runtime, no interpreter, nothing to keep up to date beside the panel itself.
+
+Apache is not the fastest server available, and that is not why it is here:
+it is the one **LiteSpeed Enterprise** reads the configuration of. A host
+installed this way is already in the format the commercial server wants, so
+buying a licence later is a switch rather than a migration. PHP comes from
+Remi, which publishes **7.4 through 8.5** for EL10 — one pool per site,
+running as that site's own account.
 
 > Forked from [OPanel](https://github.com/bnixvn/opanel) at v1.6.0 and rewritten
 > in Go. Nothing of the Python implementation remains here; it is in the fork
@@ -66,8 +73,8 @@ Either way it is the same installer underneath, and it is idempotent: every
 step checks whether it is already done, so running it again after a failure
 continues rather than starts over. It will:
 
-- install OpenLiteSpeed, LSPHP, MariaDB, valkey, nftables and the tools a
-  terminal session needs (git, composer, node, unzip)
+- install Apache, PHP-FPM, MariaDB, valkey, nftables and the tools a terminal
+  session needs (git, composer, node, unzip)
 - create the `opanel` service account and the `opanel-sftp` group
 - lay down systemd units, the nftables ruleset and the SFTP chroot
 - enable filesystem quota on the home filesystem
@@ -182,7 +189,8 @@ internal/
   httpapi/         the unprivileged side: routes, handlers, embedded web
   db/              schema, migrations, queries
   installer/       what `opanelctl install` runs
-  webserver/       OpenLiteSpeed config rendering
+  webserver/       Apache config rendering, and the backend registry
+  phpfpm/          one pool per site, owned by the site's account
   platform/        thin wrappers over the host: users, packages, quota, pty
 web/               the interface's source; built output is committed
 crates/            the Rust agent, mid-port and not yet serving anything

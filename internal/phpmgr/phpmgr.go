@@ -1,8 +1,8 @@
 // Package phpmgr abstracts where PHP comes from.
 //
-// Two providers are planned. Stage A uses lsphp packages from the LiteSpeed
-// repository; Stage B switches to CloudLinux alt-php, which additionally
-// offers PHP older than 8.1 and HardenedPHP patches for end-of-life versions.
+// One provider today: Remi's PHP-FPM packages, which carry 7.4 through 8.5
+// for EL10. CloudLinux alt-php is the one that would join it, for HardenedPHP
+// on versions past end of life.
 //
 // The abstraction earns its place at exactly one point: a site stores the
 // string "8.4", never a binary path. Changing provider is then a re-render of
@@ -27,9 +27,8 @@ func ValidVersion(v string) bool { return versionPattern.MatchString(v) }
 type Version struct {
 	Version   string `json:"version"` // "8.4"
 	Installed bool   `json:"installed"`
-	LSAPIPath string `json:"lsapi_path,omitempty"` // binary LiteSpeed runs
-	FPMPath   string `json:"fpm_path,omitempty"`   // pool manager Apache proxies to
-	CLIPath   string `json:"cli_path,omitempty"`   // binary WP-CLI and cron run
+	FPMPath   string `json:"fpm_path,omitempty"` // pool manager the server proxies to
+	CLIPath   string `json:"cli_path,omitempty"` // binary WP-CLI and cron run
 	IsDefault bool   `json:"is_default,omitempty"`
 
 	// IonCube reports whether the loader is present for this version.
@@ -42,7 +41,6 @@ type Version struct {
 
 // Provider names.
 const (
-	ProviderLSPHP  = "lsphp"
 	ProviderRemi   = "remi"
 	ProviderAltPHP = "altphp"
 )
@@ -53,7 +51,7 @@ const (
 // ValidVersion; they build a path rather than checking one, so they cannot
 // fail and have no error return.
 type Provider interface {
-	// Name is "lsphp" or "altphp".
+	// Name is one of the provider constants.
 	Name() string
 	// Supported lists the versions this provider can install, newest last.
 	Supported() []string
@@ -64,8 +62,6 @@ type Provider interface {
 	// Uninstall removes a version.
 	Uninstall(ctx context.Context, version string) error
 
-	// LSAPIBinary is the lsphp binary a vhost points at.
-	LSAPIBinary(version string) string
 	// CLIBinary is the php binary for WP-CLI, cron and the terminal.
 	CLIBinary(version string) string
 	// IniDropIn is the file the panel writes its php.ini overrides to.
@@ -78,10 +74,9 @@ type Provider interface {
 // FPMProvider is a Provider whose interpreter runs as pools of its own
 // processes that the webserver reaches over a unix socket.
 //
-// Separate from Provider because the pool layout is real for PHP-FPM and
-// meaningless for LiteSpeed's LSAPI, and an interface whose methods return
-// nothing for half its implementations teaches a reader nothing. Code that
-// needs pools type-asserts for this and says so when it is missing.
+// Separate from Provider because a provider that is not pool-shaped is still
+// plausible -- CloudLinux alt-php with LiteSpeed's LSAPI is one -- and code
+// that needs pools should have to ask rather than assume.
 type FPMProvider interface {
 	Provider
 	// PoolDir is where this version's pool definitions live.
@@ -121,20 +116,11 @@ func checkVersion(p Provider, v string) error {
 	return nil
 }
 
-// ForBackend picks the PHP provider a webserver backend can actually use.
+// ForBackend returns the PHP provider that goes with a webserver.
 //
-// It is not a preference. LiteSpeed spawns an LSAPI interpreter itself and
-// Apache proxies to a pool manager; pairing either server with the other's
-// provider produces a configuration that renders cleanly and serves nothing.
-// So the choice of webserver decides this, and switching webserver switches
-// PHP with it -- which costs nothing, because a site stores the string "8.3"
-// and never a path.
-func ForBackend(backend string) Provider {
-	switch backend {
-	case "ols":
-		return NewLSPHP()
-	default:
-		// Apache, and LiteSpeed Enterprise reading Apache's configuration.
-		return NewRemi()
-	}
-}
+// One answer today, because both servers the panel runs read the same
+// configuration and reach PHP the same way. The function stays because the
+// pairing is a real constraint rather than a coincidence: a server that
+// spawned its own interpreter would need a different provider, and the call
+// sites should already be asking.
+func ForBackend(string) Provider { return NewRemi() }
