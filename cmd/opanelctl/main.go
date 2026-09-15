@@ -828,7 +828,11 @@ func cloudLinuxSetup(ctx context.Context, args []string) error {
 		if err != nil {
 			return fmt.Errorf("move sites to alt-php: %w", err)
 		}
-		fmt.Printf("    %d site(s) moved from %s to %s.\n", res.Migrated, res.Previous, res.Provider)
+		if res.Previous == res.Provider {
+			fmt.Printf("    already on %s; %d site(s) re-rendered.\n", res.Provider, res.Migrated)
+		} else {
+			fmt.Printf("    %d site(s) moved from %s to %s.\n", res.Migrated, res.Previous, res.Provider)
+		}
 	}
 
 	// The webserver is re-rendered whatever happened above: the Manager's

@@ -28,6 +28,11 @@ const (
 	selectorCtlPath  = "/usr/bin/selectorctl"
 	altPHPGroup      = "alt-php"
 	selectorSetupArg = "--setup-cl-selector"
+	// selectorSetupTool is CloudLinux's own configurator, and nativePHP* is the
+	// interpreter it insists exists before it will run at all.
+	selectorSetupTool = "/usr/sbin/cloudlinux-selector"
+	nativePHPBinary   = "/usr/bin/php"
+	nativePHPPackage  = "php-cli"
 	// cageFSSkeleton is the template every cage is built from. Its presence
 	// is how "has --init already run here?" is answered.
 	cageFSSkeleton = "/usr/share/cagefs-skeleton"
@@ -183,6 +188,23 @@ func SetupSelector(ctx context.Context, install func(context.Context, string) er
 			return fmt.Errorf("cloudlinux: install the alt-php interpreters: %w", err)
 		}
 	}
+	// A native PHP, because CloudLinux requires one. The panel does not: its
+	// sites run alt-php per site and never touch /usr/bin/php. But PHP
+	// Selector refuses to work without it -- "Native php version is not
+	// installed, thus CloudLinux PHP selector is not able to work" is what
+	// their Manager shows -- so the choice is between installing a small
+	// interpreter nothing serves and not having the feature.
+	//
+	// This corrects an earlier decision here. Finding no system PHP, the
+	// honest-looking answer was "then native means nothing on this host" and
+	// the step carried on. That was right about the file and wrong about the
+	// consequence: it left the selector broken, which is not a thing to be
+	// quietly at peace with.
+	if !fileExists(nativePHPBinary) && install != nil {
+		if err := install(ctx, nativePHPPackage); err != nil {
+			return fmt.Errorf("cloudlinux: install a native php for the selector: %w", err)
+		}
+	}
 	if err := writeNativeConf(); err != nil {
 		return err
 	}
@@ -196,6 +218,20 @@ func SetupSelector(ctx context.Context, install func(context.Context, string) er
 	// this the selector offers versions that are not in their cage.
 	if out, err := exec.CommandContext(ctx, cageFSCtl, "--force-update").CombinedOutput(); err != nil {
 		return fmt.Errorf("cloudlinux: refresh the CageFS skeleton: %w (%s)", err, lastLine(string(out)))
+	}
+
+	// CloudLinux's own last step, and the one their error message names. It
+	// reads native.conf to enumerate the native interpreter's extensions, so
+	// it has to run after that file is written -- run before, it fails with
+	// "Cannot get extensions list", which says nothing about ordering.
+	//
+	// --json is not optional: without it the tool answers "use --json option,
+	// other modes currently unsupported" and exits non-zero.
+	if fileExists(selectorSetupTool) {
+		cmd := exec.CommandContext(ctx, selectorSetupTool, "setup", "--interpreter=php", "--json")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cloudlinux: configure PHP Selector: %w (%s)", err, lastLine(string(out)))
+		}
 	}
 	return nil
 }
