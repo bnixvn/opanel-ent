@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
 )
@@ -181,6 +182,14 @@ func registerCloudLinux(r *agent.Registry) {
 				return pkgmgr.InstallGroup(ctx, group)
 			})
 			if err != nil {
+				return cloudlinux.SelectorStatus{}, err
+			}
+			// CloudLinux leaves the system-wide interpreter with four
+			// extensions and composes a fuller set per customer inside their
+			// cage. This panel's sites run outside any cage, so the
+			// system-wide set is the set they get -- four extensions, no gd,
+			// no mbstring, no Phar, and a WP-CLI that cannot start.
+			if err := phpmgr.NewAltPHP().EnableStandardExtensionsAll(ctx); err != nil {
 				return cloudlinux.SelectorStatus{}, err
 			}
 			return cloudlinux.SelectorState(ctx), nil

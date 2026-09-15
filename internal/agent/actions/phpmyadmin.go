@@ -282,16 +282,20 @@ func quoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// webserverUser is the account OpenLiteSpeed runs as, and therefore the one
-// that has to be able to read phpMyAdmin's configuration and write its cache.
-const webserverUser = "nobody"
-
-// chownToWebserver hands a path to the account OpenLiteSpeed runs as.
+// chownToWebserver hands a path to the account phpMyAdmin's interpreter runs
+// as.
+//
+// That is the pool's user, not the webserver's. This used to say "nobody",
+// which was the account OpenLiteSpeed ran as -- and OpenLiteSpeed was removed
+// some time ago. Nothing noticed until phpMyAdmin was installed on a host
+// where the two differ: the configuration was handed to nobody, the pool runs
+// as opanel, and phpMyAdmin greeted every visitor with "Existing
+// configuration file is not readable".
 func chownToWebserver(p string) error {
-	// The webserver user is what serves phpMyAdmin, and it is the only
-	// account that should be able to read the configuration holding the
-	// signon secret.
-	res, err := run.Cmd(context.Background(), []string{"id", "-u", webserverUser})
+	// The account that reads the configuration is the one that runs the code
+	// in it, and it is the only account that should be able to: the file
+	// holds the signon secret.
+	res, err := run.Cmd(context.Background(), []string{"id", "-u", pmaPoolUser})
 	if err != nil {
 		return err
 	}
@@ -321,10 +325,10 @@ const PMAPHPVersion = "8.4"
 func checkWebserverCanWrite(dir string) error {
 	probe := filepath.Join(dir, ".opanel-write-test")
 	if _, err := run.Cmd(context.Background(), []string{
-		"runuser", "-u", webserverUser, "--", "touch", probe,
+		"runuser", "-u", pmaPoolUser, "--", "touch", probe,
 	}, run.Timeout(30*time.Second)); err != nil {
-		return fmt.Errorf("%s is not usable by the webserver account %q; "+
-			"phpMyAdmin needs a temp directory it can write to", dir, webserverUser)
+		return fmt.Errorf("%s is not usable by %q, the account phpMyAdmin's "+
+			"interpreter runs as; it needs a temp directory it can write to", dir, pmaPoolUser)
 	}
 	_ = os.Remove(probe)
 	return nil

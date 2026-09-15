@@ -78,7 +78,7 @@ export default function Waf() {
           </dd>
         </dl>
 
-        {waf.module_available && !waf.rules_installed && (
+        {!waf.rules_installed && (
           <p style={{ marginBottom: 0 }}>
             <button
               type="button"
@@ -86,15 +86,20 @@ export default function Waf() {
               disabled={busy}
               onClick={() => run(() => api.post('/waf/install', {}), 'Rule set installed in log-only mode')}
             >
-              {busy ? 'Installing…' : 'Install the OWASP rule set'}
+              {busy ? 'Installing…' : 'Install the firewall'}
             </button>
-            <span className="muted"> Downloads the Core Rule Set and starts in log-only mode.</span>
-          </p>
-        )}
-        {!waf.module_available && (
-          <p className="muted" style={{ marginBottom: 0, fontSize: '.85rem' }}>
-            This webserver build has no ModSecurity module, so there is nothing
-            to configure here.
+            {/*
+              Offered whether or not the engine is here. Installing it is part
+              of what this button does -- the panel was hiding the button on
+              exactly the hosts that needed it and saying there was nothing to
+              configure, which was true only because nothing had been
+              installed yet.
+            */}
+            <span className="muted">
+              {waf.module_available
+                ? ' Downloads the Core Rule Set and starts in log-only mode.'
+                : ' Installs the ModSecurity engine and the Core Rule Set, and starts in log-only mode.'}
+            </span>
           </p>
         )}
       </Card>
