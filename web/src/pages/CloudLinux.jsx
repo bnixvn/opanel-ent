@@ -26,19 +26,6 @@ export default function CloudLinux() {
     load();
   }
 
-  async function setupSelector() {
-    msg.clear();
-    setBusy(true);
-    try {
-      await api.post('/cloudlinux/selector', {});
-      msg.ok('PHP Selector can now offer every alt-php version installed here.');
-    } catch (err) {
-      msg.fail(err);
-    }
-    setBusy(false);
-    load();
-  }
-
   async function installIntegration() {
     msg.clear();
     setBusy(true);
@@ -135,59 +122,6 @@ export default function CloudLinux() {
         </Card>
       )}
 
-      {state && st?.installed && (
-        <Card title="PHP Selector">
-          <p className="muted">
-            The versions a customer can choose for themselves, from
-            CloudLinux's own alt-php builds. Separate from the version a site
-            runs, which the panel sets per site: this is the interpreter inside
-            the customer's own shell and cron. Setting it up installs every
-            alt-php CloudLinux ships (about 2&nbsp;GB) and rebuilds the CageFS
-            skeleton around them, which takes a few minutes.
-          </p>
-          <dl className="kv">
-            <dt>Offers</dt>
-            <dd>
-              {st.selector?.versions?.length
-                ? st.selector.versions.join(', ')
-                : <Tag kind="bad">nothing yet</Tag>}
-            </dd>
-            <dt>Native</dt>
-            <dd>
-              {st.selector?.native
-                ? <code>{st.selector.native}</code>
-                : <Tag kind="bad">not declared</Tag>}
-            </dd>
-          </dl>
-          <button type="button" disabled={busy || !st.selector?.available} onClick={setupSelector}>
-            {busy ? 'Working…' : (st.selector?.versions?.length ? 'Install the rest' : 'Set it up')}
-          </button>
-          {!st.selector?.available && (
-            <p className="muted">
-              CageFS has to be installed first: the selector works by giving
-              each customer a different interpreter inside their own cage.
-            </p>
-          )}
-        </Card>
-      )}
-
-      {state && st && (
-        <Card title="Components">
-          <p className="muted">
-            What CloudLinux has installed here. The panel reports rather than
-            installs these: each one changes how the server runs, and CageFS in
-            particular changes what a customer's shell can see.
-          </p>
-          <dl className="kv">
-            {Object.entries(st.tools || {}).map(([name, present]) => (
-              <React.Fragment key={name}>
-                <dt><code>{name}</code></dt>
-                <dd>{present ? <Tag kind="ok">installed</Tag> : <Tag>not installed</Tag>}</dd>
-              </React.Fragment>
-            ))}
-          </dl>
-        </Card>
-      )}
     </>
   );
 }
