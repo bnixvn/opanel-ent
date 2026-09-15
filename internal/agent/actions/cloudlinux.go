@@ -12,7 +12,6 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
-	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
 // The CloudLinux tools this panel reads. Each is optional: the subsystem can
@@ -144,12 +143,11 @@ func registerCloudLinux(r *agent.Registry) {
 			if err := cloudlinux.InstallManager(); err != nil {
 				return CLStatus{}, err
 			}
-			// Its own service serves it. Started here rather than left to the
-			// operator: an interface that is installed and not running is the
-			// same as one that is not installed, from the page's point of view.
-			if err := svc.Enable(ctx, "lvemanager", true); err != nil {
-				return CLStatus{}, fmt.Errorf("start CloudLinux Manager: %w", err)
-			}
+			// The webserver serves it, so it is not running yet: the vhost
+			// appears on the next apply, which the API does as soon as this
+			// returns. Reporting the status from here would say "installed,
+			// not running" for a second and make the page offer to install it
+			// again.
 			return clStatus(ctx), nil
 		})
 

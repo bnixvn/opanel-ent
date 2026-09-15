@@ -265,6 +265,10 @@ func extraListen(cfg webserver.ServerConfig) []string {
 	if cfg.PMARoot != "" && cfg.PMAPort != 0 {
 		out = append(out, "127.0.0.1:"+strconv.Itoa(cfg.PMAPort))
 	}
+	// CloudLinux Manager, the same way.
+	if cfg.LVERoot != "" && cfg.LVEPort != 0 {
+		out = append(out, "127.0.0.1:"+strconv.Itoa(cfg.LVEPort))
+	}
 	return out
 }
 

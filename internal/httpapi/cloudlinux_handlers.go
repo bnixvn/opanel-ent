@@ -79,11 +79,29 @@ func (s *Server) handleCloudLinuxIntegration(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, status)
 }
 
-// handleCloudLinuxManagerInstall puts CloudLinux Manager in place and starts
-// the service that serves it.
+// handleCloudLinuxManagerInstall puts CloudLinux Manager in place and has the
+// webserver start serving it.
+//
+// Two steps because the second is the webserver's job, not CloudLinux's: the
+// vendor's installer copies the files, and the vhost that serves them is
+// written by the same render that writes every other vhost on the host. So
+// the install is followed by a sync, and the status is read again afterwards
+// -- the first one would say "installed but not running", which is what the
+// page shows when it wants to offer the install button again.
 func (s *Server) handleCloudLinuxManagerInstall(w http.ResponseWriter, r *http.Request) {
-	status, err := agentclient.Call[actions.CLStatus](r.Context(), s.agent,
-		"cl.manager_install", 1, struct{}{})
+	ctx := r.Context()
+	if _, err := agentclient.Call[actions.CLStatus](ctx, s.agent,
+		"cl.manager_install", 1, struct{}{}); err != nil {
+		s.agentError(w, err)
+		return
+	}
+	if err := s.sites.SyncWebserver(ctx); err != nil {
+		s.audit(r, "cloudlinux.manager", "install", false, err.Error())
+		writeError(w, http.StatusInternalServerError, "webserver_apply",
+			"CloudLinux Manager is installed, but the webserver would not take the configuration that serves it: "+err.Error())
+		return
+	}
+	status, err := agentclient.Call[actions.CLStatus](ctx, s.agent, "cl.status", 1, struct{}{})
 	if err != nil {
 		s.agentError(w, err)
 		return

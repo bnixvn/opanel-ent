@@ -2,6 +2,7 @@ package cloudlinux
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -17,19 +18,33 @@ import (
 // CloudLinux Manager, as this panel arranges it.
 //
 // The Manager is CloudLinux's own interface. On the panels they support it is
-// dropped into the panel's web root; for everybody else the vendor ships a
-// "panelless" copy, an installer that puts it where the integration file
-// says, and a service that serves it. This panel uses that service and
-// proxies to it, which is the same arrangement phpMyAdmin already has and for
-// the same reason: the Manager signs people in with system accounts, and a
-// web login for root does not belong on a public port.
+// dropped into the panel's web root and served by the panel's own webserver,
+// and that is what this does: the vendor's installer copies the Manager to a
+// directory of ours, the webserver gets a vhost for it on the loopback
+// address, and the panel proxies to that behind its own session. The same
+// arrangement phpMyAdmin already has, for the same reason.
+//
+// The vendor also ships a "panelless" service that serves the Manager itself
+// on a port of its own. This panel does not use it: it authenticates with
+// PAM, so it asks for a system password inside a page the panel has already
+// signed somebody in for. run_service is 0 in the integration file and the
+// unit is stopped, so there is one door rather than two.
 const (
 	ManagerRoot = "/usr/share/opanel/lvemanager"
-	// ManagerPort is where the vendor's own service listens. It binds every
-	// interface, which is safe here only because the panel's firewall opens
-	// four ports and this is not one of them -- the panel reaches it at
-	// 127.0.0.1 and nothing outside the machine can.
-	ManagerPort = 2223
+	// ManagerPort is the loopback port the Manager's vhost listens on.
+	// Nothing outside this machine can reach it: the vhost binds 127.0.0.1
+	// and the firewall never opens it.
+	ManagerPort = 8082
+	// ManagerPHPVersion is the interpreter the Manager runs under, and
+	// ManagerPool is the pool it runs in.
+	//
+	// As "opanel", not as root: PHP-FPM refuses to start a pool as root, and
+	// the Manager does not need it -- everything privileged it does goes
+	// through sudo, which the vendor's own clsudoers file grants.
+	ManagerPHPVersion = "8.4"
+	ManagerPool       = "lvemanager.opanel"
+	// ManagerUser is the account that pool runs as.
+	ManagerUser = "opanel"
 
 	vendorPHPPath  = ConfigDir + "/vendor.php"
 	userInfoPath   = ConfigDir + "/ui_user_info"
@@ -37,13 +52,22 @@ const (
 	pluginInstall  = "/usr/share/l.v.e-manager/install-lvemanager-plugin.py"
 	pluginPython   = "/opt/cloudlinux/venv/bin/python3"
 	managerBaseURI = "/lvemanager"
+	// noPanelUnit is the vendor's own service, which this panel replaces.
+	noPanelUnit = "lvemanager.service"
+	// adminHook is CloudLinux's own hook for "this account is an
+	// administrator of the panel": it puts the account in clsudoers and
+	// proc_super_gid, which is what lets the Manager's PHP run their tools.
+	adminHook = "/usr/share/cloudlinux/hooks/post_modify_admin.py"
 )
 
 // ManagerPrefix is the path the panel serves the Manager under.
 const ManagerPrefix = managerBaseURI
 
-// ManagerRunning reports whether the vendor's own service is up. It is the
-// one that serves the Manager here: run_service in the integration file.
+// ManagerRunning reports whether the Manager is being served.
+//
+// A dial rather than a look at the config: the vhost is written by the
+// webserver backend, and what matters is whether something is actually
+// answering on the port the panel proxies to.
 func ManagerRunning() bool {
 	c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(ManagerPort), 2*time.Second)
 	if err != nil {
@@ -79,17 +103,21 @@ func ManagerSecret() (string, error) {
 	}
 	secret := hex.EncodeToString(raw)
 
-	if err := os.MkdirAll(filepath.Dir(secretPath), 0o750); err != nil {
+	dir := filepath.Dir(secretPath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(secretPath, []byte(secret+"\n"), 0o640); err != nil {
 		return "", fmt.Errorf("cloudlinux: write %s: %w", secretPath, err)
 	}
-	if u, err := user.Lookup("opanel"); err == nil {
-		uid, _ := strconv.Atoi(u.Uid)
+	// The directory as well as the file: a file group-readable by opanel
+	// inside a directory opanel cannot enter is not readable at all, and the
+	// two processes that need this -- the panel, and the Manager's pool --
+	// both run as opanel.
+	if u, err := user.Lookup(ManagerUser); err == nil {
 		gid, _ := strconv.Atoi(u.Gid)
 		_ = os.Chown(secretPath, 0, gid)
-		_ = uid
+		_ = os.Chown(dir, 0, gid)
 	}
 	return secret, nil
 }
@@ -125,6 +153,42 @@ func InstallManager() error {
 	if !ManagerInstalled() {
 		return fmt.Errorf("cloudlinux: the installer finished but %s/index.php is not there:\n%s",
 			ManagerRoot, lastLine(string(out)))
+	}
+	// The vendor's installer starts its own panelless service whether or not
+	// the integration file asked for one. Leaving it up would mean a second
+	// copy of the Manager on a port of its own, asking for a system password
+	// -- the thing this arrangement exists to avoid.
+	retireNoPanelService()
+	return grantManagerSudo()
+}
+
+// retireNoPanelService stops and disables the vendor's panelless service.
+//
+// Best effort on purpose: on a host where it was never installed there is
+// nothing to stop, and that is not a reason to fail an install.
+func retireNoPanelService() {
+	_ = exec.Command("systemctl", "disable", "--now", noPanelUnit).Run()
+}
+
+// grantManagerSudo lets the account the Manager's PHP runs as call
+// CloudLinux's own tools.
+//
+// Everything the Manager does, it does by running cloudlinux-cli.py under
+// sudo, so without this the interface loads and every panel in it is empty.
+// The rights come from group membership -- clsudoers for the tools, and on
+// releases that still have it proc_super_gid for the /proc entries the usage
+// figures are read from -- and CloudLinux's own hook is what puts an account
+// in them. Calling the hook rather than writing a sudoers file keeps the
+// arrangement theirs: CloudLinux 10 has dropped one of those two groups
+// already, and an upgrade that changes them again changes this too.
+func grantManagerSudo() error {
+	if _, err := os.Stat(adminHook); err != nil {
+		return nil // an older CloudLinux without the hook; nothing to do
+	}
+	cmd := exec.Command(pluginPython, adminHook, "create", "--name", ManagerUser)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("cloudlinux: grant %s the manager's rights: %w (%s)",
+			ManagerUser, err, lastLine(string(out)))
 	}
 	return nil
 }
@@ -186,19 +250,42 @@ putenv('OPANEL_ROLE=' . $role);
 	info := `#!/bin/sh
 # Written by OPanel. Do not edit.
 #
-# CloudLinux Manager runs this to learn who is looking at it. The identity is
-# in the environment because vendor.php put it there, having taken it from the
-# panel session that authenticated the request. Nothing here reads whoami: the
-# vendor's own sample did, and it made every caller an administrator.
+# CloudLinux Manager runs this to learn who is looking at it, passing the
+# session token it holds as the one argument. The token is not the identity
+# here and is deliberately ignored: it says which browser session is asking,
+# and the panel has already decided who that is. The answer comes from the
+# environment, where vendor.php put it after checking the panel's signature.
+#
+# Nothing here reads whoami. The vendor's own sample did, and it made every
+# caller an administrator.
 #
 # Fails closed. No identity means the lowest role there is.
-printf '{"userName":"%s","userType":"%s","lang":"en","assetsUri":".","baseUri":"%s","defaultDomain":""}\n' \
-  "${OPANEL_USER:-nobody}" "${OPANEL_ROLE:-user}" "` + managerBaseURI + `"
+user="${OPANEL_USER:-nobody}"
+uid="$(id -u "$user" 2>/dev/null || echo 0)"
+
+# baseUri ends in a slash because the Manager puts it in <base href>, and a
+# base without one resolves every relative link one directory too high --
+# out of the Manager and into the panel's own routes.
+base="` + managerBaseURI + `"
+printf '{"userName":"%s","userId":%s,"userType":"%s","lang":"en","assetsUri":"%s","baseUri":"%s/","userDomain":""}' "$user" "$uid" "${OPANEL_ROLE:-user}" "$base" "$base"
 `
 	if err := os.WriteFile(userInfoPath, []byte(info), 0o755); err != nil {
 		return fmt.Errorf("cloudlinux: write %s: %w", userInfoPath, err)
 	}
 	return nil
+}
+
+// ManagerToken is the session token the panel hands the Manager for a user.
+//
+// The Manager insists on one -- it refuses a request that carries no
+// CLSIDTOKEN -- and on the panels it was written for the token is what maps a
+// browser back to a signed-in account. Here it does not need to: the identity
+// travels in signed headers on the same request, and ui_user_info throws the
+// token away. So it carries no authority, and is derived rather than stored
+// only so that it is stable per user and reveals nothing if it leaks.
+func ManagerToken(secret, username string) string {
+	sum := sha256.Sum256([]byte(secret + "/lvemanager/" + username))
+	return hex.EncodeToString(sum[:16])
 }
 
 func phpQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "\\'") + "'" }

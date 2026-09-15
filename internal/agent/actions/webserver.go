@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/phpfpm"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/svc"
@@ -123,6 +124,13 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 			cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
 		}
 	}
+	if cloudlinux.ManagerInstalled() {
+		cfg.LVERoot = cloudlinux.ManagerRoot
+		cfg.LVEPort = cloudlinux.ManagerPort
+		if fp, ok := provider.(phpmgr.FPMProvider); ok {
+			cfg.LVEFPMSocket = fp.SocketPath(cloudlinux.ManagerPHPVersion, cloudlinux.ManagerPool)
+		}
+	}
 
 	rendered, err := target.Render(cfg, sites)
 	if err != nil {
@@ -136,6 +144,9 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 		pools := phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB())
 		if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
 			pools = append(pools, pmaPool(cfg))
+		}
+		if cfg.LVERoot != "" && cfg.LVEFPMSocket != "" {
+			pools = append(pools, lvePool(cfg))
 		}
 		if err := phpfpm.Apply(ctx, fp, pools); err != nil {
 			return WebserverSwitchResult{}, err
@@ -291,6 +302,36 @@ func pmaPool(cfg webserver.ServerConfig) phpfpm.Pool {
 		Socket:      cfg.PMAFPMSocket,
 		MaxChildren: 5,
 		Basedir:     cfg.PMARoot,
+		LogDir:      "/var/log/opanel",
+		SocketOwner: cfg.ServerUser,
+	}
+}
+
+// lvePool is the interpreter CloudLinux Manager runs in.
+//
+// open_basedir is wider than a site's because the Manager is not a site: it
+// reads the integration file the panel wrote, the secret that proves the
+// request came through the panel, and the vendor's own tree. Everything
+// privileged it does happens through sudo, which open_basedir does not
+// govern, so the list is about letting it read its own configuration rather
+// than about what it is allowed to do.
+func lvePool(cfg webserver.ServerConfig) phpfpm.Pool {
+	basedir := strings.Join([]string{
+		cfg.LVERoot,
+		cloudlinux.ConfigDir,
+		"/etc/opanel",
+		"/usr/share/l.v.e-manager",
+		"/var/lve",
+		"/etc/container",
+	}, ":")
+	return phpfpm.Pool{
+		Name:        cloudlinux.ManagerPool,
+		Version:     cloudlinux.ManagerPHPVersion,
+		User:        cloudlinux.ManagerUser,
+		Group:       cloudlinux.ManagerUser,
+		Socket:      cfg.LVEFPMSocket,
+		MaxChildren: 5,
+		Basedir:     basedir,
 		LogDir:      "/var/log/opanel",
 		SocketOwner: cfg.ServerUser,
 	}

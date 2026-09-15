@@ -69,6 +69,35 @@ Listen {{ . }}
 {{- end }}
 </VirtualHost>
 {{- end }}
+{{- if and .Config.LVERoot .Config.LVEPort }}
+
+# CloudLinux Manager, bound to the loopback address. The panel proxies to it
+# after checking the session and tells it who is asking, so it needs no login
+# of its own -- which is the point: the vendor's alternative is a service that
+# asks for a system password inside a page the panel has already signed
+# somebody in for.
+<VirtualHost 127.0.0.1:{{ .Config.LVEPort }}>
+    DocumentRoot "{{ .Config.LVERoot }}"
+
+    <Directory "{{ .Config.LVERoot }}">
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+        DirectoryIndex index.php
+    </Directory>
+
+    # The panel terminates TLS. Without this PHP believes the request was
+    # plain, and the cookies the Manager sets lose their Secure flag on the
+    # way back through a connection that was in fact encrypted.
+    SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
+{{- if .Config.LVEFPMSocket }}
+
+    <FilesMatch "\.php$">
+        SetHandler "proxy:unix:{{ .Config.LVEFPMSocket }}|fcgi://localhost"
+    </FilesMatch>
+{{- end }}
+</VirtualHost>
+{{- end }}
 
 # Load order decides which vhost answers for a hostname nothing claims, and
 # this file sorts before the distribution's ssl.conf and welcome.conf. The

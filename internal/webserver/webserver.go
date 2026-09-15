@@ -244,6 +244,19 @@ type ServerConfig struct {
 	// PMAFPMSocket is the pool the server proxies it to.
 	PMAFPMSocket string
 
+	// LVERoot is where CloudLinux Manager is installed, empty when it is not.
+	//
+	// The same arrangement phpMyAdmin has and for the same reason: it is a
+	// PHP application that only signed-in panel users should see, so it gets
+	// a vhost on the loopback address and the panel proxies to it. The
+	// alternative the vendor ships is a service of its own that asks for a
+	// system password, which is a second door into the same room.
+	LVERoot string
+	// LVEPort is the loopback port that vhost listens on.
+	LVEPort int
+	// LVEFPMSocket is the pool the server proxies it to.
+	LVEFPMSocket string
+
 	// WAFRulesFile is the ModSecurity configuration to load, empty when the
 	// engine or its rules are not installed.
 	//

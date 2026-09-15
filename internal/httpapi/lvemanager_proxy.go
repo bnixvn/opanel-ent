@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"crypto/tls"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bnixvn/opanel-ent/internal/auth"
 	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 )
 
@@ -19,32 +19,47 @@ import (
 // be a worse version of something that already exists. So the panel serves
 // it rather than copying it.
 //
-// Through the panel rather than on its own port, for the reason the firewall
-// gives when asked to open one: the Manager authenticates with system
-// accounts, and a web login for root on the public internet is a different
-// proposition from a panel page. Here it is reachable only by somebody the
-// panel has already signed in as an administrator.
+// Three things travel with every proxied request, and together they are why
+// the Manager asks for no password of its own:
+//
+//   - X-OPanel-Auth, the shared secret. vendor.php refuses any request that
+//     cannot present it. The Manager's vhost is on the loopback address, and
+//     on a hosting server that is not a boundary -- every customer with a
+//     shell is already inside it -- so the proxy has to prove it is the panel.
+//   - X-OPanel-User and X-OPanel-Role, the identity the panel has already
+//     established. The Manager decides what to show from these.
+//   - CLSIDTOKEN, a session token. The Manager refuses a request without one.
+//     It carries no authority here: the identity is in the headers above, and
+//     ui_user_info throws the token away.
 func (s *Server) lveManagerProxy() http.Handler {
 	target := &url.URL{
-		Scheme: "https",
+		Scheme: "http",
 		Host:   "127.0.0.1:" + strconv.Itoa(cloudlinux.ManagerPort),
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, cloudlinux.ManagerPrefix)
-			if pr.Out.URL.Path == "" {
-				pr.Out.URL.Path = "/"
-			}
+			pr.Out.URL.Path = managerPath(pr.In.URL.Path)
 			pr.Out.Host = pr.In.Host
 			pr.Out.Header.Set("X-Forwarded-Proto", "https")
 			pr.Out.Header.Set("X-Forwarded-Prefix", cloudlinux.ManagerPrefix)
+
+			u := userFrom(pr.In.Context())
+			secret, err := cloudlinux.ManagerSecret()
+			if err != nil || u == nil {
+				// Nothing to prove the request with. Strip anything the
+				// client may have sent under these names and let vendor.php
+				// refuse it, rather than passing a half-formed identity on.
+				pr.Out.Header.Del("X-OPanel-Auth")
+				pr.Out.Header.Del("X-OPanel-User")
+				pr.Out.Header.Del("X-OPanel-Role")
+				return
+			}
+			pr.Out.Header.Set("X-OPanel-Auth", secret)
+			pr.Out.Header.Set("X-OPanel-User", u.Username)
+			pr.Out.Header.Set("X-OPanel-Role", managerRole(u.Role))
+			setManagerToken(pr.Out, cloudlinux.ManagerToken(secret, u.Username))
 		},
-		// The Manager serves itself over TLS with the panel's own
-		// certificate, and this connection never leaves the machine: it is
-		// dialled at 127.0.0.1, where the name on the certificate cannot
-		// match and does not need to.
-		Transport: loopbackTLS(),
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			s.log.Warn("httpapi: CloudLinux Manager is not reachable", "err", err)
 			writeError(w, http.StatusBadGateway, "lvemanager_down",
@@ -58,17 +73,53 @@ func (s *Server) lveManagerProxy() http.Handler {
 	})
 }
 
-// loopbackTLS dials the Manager over TLS without checking the name.
+// managerPath turns a panel path into the path inside the Manager's vhost.
 //
-// Not a weakened check: the connection is to 127.0.0.1 and never leaves the
-// machine, and no certificate can carry a name that matches a loopback dial
-// of a service that also answers on the panel's hostname. Anything able to
-// intercept this is already root here.
-func loopbackTLS() *http.Transport {
-	return &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // loopback only
-		TLSHandshakeTimeout: 10 * time.Second,
+// The doubled slash is not hypothetical: the Manager builds its own request
+// handler as baseUri + "/" + "send-request.php", and baseUri has to end in a
+// slash for the <base href> it also goes into to resolve relative links
+// inside the Manager rather than one directory above it.
+func managerPath(p string) string {
+	out := strings.TrimPrefix(p, cloudlinux.ManagerPrefix)
+	for strings.Contains(out, "//") {
+		out = strings.ReplaceAll(out, "//", "/")
 	}
+	if out == "" {
+		out = "/"
+	}
+	return out
+}
+
+// managerRole maps a panel role onto the three the Manager knows.
+//
+// Anything unrecognised becomes "user", the least it can be. vendor.php makes
+// the same decision again at the other end: this is the kind of mapping where
+// a new role added later should show somebody too little rather than too much.
+func managerRole(role string) string {
+	switch auth.Role(role) {
+	case auth.RoleAdmin:
+		return "admin"
+	case auth.RoleReseller:
+		return "reseller"
+	default:
+		return "user"
+	}
+}
+
+// setManagerToken replaces any CLSIDTOKEN the client sent with the panel's.
+//
+// Replaces rather than adds: a token left over from some earlier arrangement
+// -- the vendor's own service used to set one on this origin -- would
+// otherwise be the one the Manager read.
+func setManagerToken(r *http.Request, token string) {
+	kept := make([]string, 0, 4)
+	for _, c := range r.Cookies() {
+		if c.Name != "CLSIDTOKEN" {
+			kept = append(kept, c.Name+"="+c.Value)
+		}
+	}
+	kept = append(kept, "CLSIDTOKEN="+token)
+	r.Header.Set("Cookie", strings.Join(kept, "; "))
 }
 
 // lveManagerResponseWriter keeps redirects inside the proxied path.

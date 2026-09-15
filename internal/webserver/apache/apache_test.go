@@ -182,3 +182,45 @@ func TestListenOnlyForNonStandardPorts(t *testing.T) {
 		t.Errorf("non-standard ports were not declared:\n%s", main)
 	}
 }
+
+// The Manager's vhost is loopback-only, and that is the whole of its access
+// control: the panel proxies to it after checking the session, and it does
+// not check one of its own. A render that put it on a public listener would
+// hand CloudLinux's administrative interface to the internet, and would still
+// look right in every other respect -- so the test is about the address.
+func TestCloudLinuxManagerVhostIsLoopbackOnly(t *testing.T) {
+	cfg := webserver.DefaultServerConfig()
+	cfg.LVERoot = "/usr/share/opanel/lvemanager"
+	cfg.LVEPort = 8082
+	cfg.LVEFPMSocket = "/run/opanel-fpm/lvemanager.sock"
+
+	main := string(render(t, cfg, nil).Main.Content)
+
+	if !strings.Contains(main, "Listen 127.0.0.1:8082") {
+		t.Errorf("the Manager's listener was not bound to the loopback address:\n%s", main)
+	}
+	if strings.Contains(main, "\nListen 8082") {
+		t.Errorf("the Manager was declared on a public listener:\n%s", main)
+	}
+	if !strings.Contains(main, "<VirtualHost 127.0.0.1:8082>") {
+		t.Errorf("no vhost for the Manager:\n%s", main)
+	}
+	if !strings.Contains(main, "proxy:unix:/run/opanel-fpm/lvemanager.sock") {
+		t.Errorf("the Manager's PHP was not sent to its pool:\n%s", main)
+	}
+	// Without this PHP sees a plain request and drops Secure from the cookies
+	// it sets, on a connection the panel did in fact encrypt.
+	if !strings.Contains(main, "HTTPS=on") {
+		t.Errorf("the proxied scheme was not passed through:\n%s", main)
+	}
+}
+
+// Nothing about the Manager is rendered when it is not installed. A vhost
+// pointing at a directory that does not exist is a 500 waiting for somebody
+// to find it, and an extra listener for no reason.
+func TestNoManagerVhostWhenNotInstalled(t *testing.T) {
+	main := string(render(t, webserver.DefaultServerConfig(), nil).Main.Content)
+	if strings.Contains(main, "lvemanager") || strings.Contains(main, "8082") {
+		t.Errorf("the Manager was rendered on a host that does not have it:\n%s", main)
+	}
+}

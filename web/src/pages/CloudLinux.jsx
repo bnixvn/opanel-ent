@@ -119,9 +119,10 @@ export default function CloudLinux() {
         <Card title="CloudLinux Manager">
           <p className="muted">
             CloudLinux's own interface: current usage, users, statistics,
-            options, packages and the selectors. It is served here through the
-            panel rather than on a port of its own, because it signs people in
-            with system accounts.
+            options, packages and the selectors. The panel serves it and tells
+            it who is asking, so it does not ask again -- the alternative
+            CloudLinux ships is a service on a port of its own that wants a
+            system password.
           </p>
           <button type="button" disabled={busy} onClick={installManager}>
             {busy ? 'Installing…' : (st.manager ? 'Start it' : 'Install it')}

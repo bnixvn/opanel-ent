@@ -11,6 +11,7 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent"
+	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/phpfpm"
 	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
@@ -415,6 +416,15 @@ func registerSites(r *agent.Registry, deps Deps) {
 				cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
 			}
 		}
+		// CloudLinux Manager, when its files are here. Same shape as
+		// phpMyAdmin: a loopback vhost the panel proxies to.
+		if cloudlinux.ManagerInstalled() {
+			cfg.LVERoot = cloudlinux.ManagerRoot
+			cfg.LVEPort = cloudlinux.ManagerPort
+			if fp, ok := provider.(phpmgr.FPMProvider); ok {
+				cfg.LVEFPMSocket = fp.SocketPath(cloudlinux.ManagerPHPVersion, cloudlinux.ManagerPool)
+			}
+		}
 
 		rendered, err := ws.Render(cfg, sites)
 		if err != nil {
@@ -427,6 +437,9 @@ func registerSites(r *agent.Registry, deps Deps) {
 			pools := phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB())
 			if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
 				pools = append(pools, pmaPool(cfg))
+			}
+			if cfg.LVERoot != "" && cfg.LVEFPMSocket != "" {
+				pools = append(pools, lvePool(cfg))
 			}
 			if err := phpfpm.Apply(ctx, fp, pools); err != nil {
 				return struct{}{}, err
