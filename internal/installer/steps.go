@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
+	"github.com/bnixvn/opanel-ent/internal/phpfpm"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/distro"
 	"github.com/bnixvn/opanel-ent/internal/platform/pkgmgr"
@@ -309,7 +310,20 @@ func stepWebserverConfig(ctx context.Context, o *Options) error {
 	if err != nil {
 		return err
 	}
-	rendered, err := b.Render(webserver.DefaultServerConfig(), nil)
+	cfg := webserver.DefaultServerConfig()
+
+	// Before the server starts, not after. Remi's packages tie every PHP
+	// version they install to httpd's unit, so starting Apache on a host with
+	// no sites drags up a pool manager for each of them -- and one with no
+	// pools exits with "No pool defined". A brand-new host would come up with
+	// a row of failed services and nothing to say they were harmless.
+	if fp, ok := phpmgr.ForBackend(o.Backend).(phpmgr.FPMProvider); ok {
+		if err := phpfpm.Prepare(ctx, fp, cfg.ServerUser); err != nil {
+			return err
+		}
+	}
+
+	rendered, err := b.Render(cfg, nil)
 	if err != nil {
 		return err
 	}

@@ -155,16 +155,17 @@ func Render(p phpmgr.FPMProvider, pool Pool) (webserver.File, error) {
 // telling the two cases apart is more machinery than a two-second restart of
 // a service that is idle most of the time.
 func Apply(ctx context.Context, p phpmgr.FPMProvider, pools []Pool) error {
-	if err := ensureSocketDir(pools); err != nil {
+	owner := ""
+	if len(pools) > 0 {
+		owner = pools[0].SocketOwner
+	}
+	if err := Prepare(ctx, p, owner); err != nil {
 		return err
 	}
 	for _, pool := range pools {
 		if err := ensureLogDir(pool); err != nil {
 			return err
 		}
-	}
-	if err := dropVendorWants(ctx, p); err != nil {
-		return err
 	}
 
 	byVersion := make(map[string][]Pool)
@@ -234,6 +235,20 @@ func Apply(ctx context.Context, p phpmgr.FPMProvider, pools []Pool) error {
 	return nil
 }
 
+// Prepare makes the host ready to run pools, without needing any.
+//
+// The installer calls it on a machine with no sites at all. Two of the three
+// things it does matter there: the vendor drop-ins have to go before Apache
+// is started, or a freshly installed host comes up with a failed service for
+// every PHP version it has, and nothing about that tells the operator it is
+// harmless.
+func Prepare(ctx context.Context, p phpmgr.FPMProvider, serverUser string) error {
+	if err := ensureSocketDir(serverUser); err != nil {
+		return err
+	}
+	return dropVendorWants(ctx, p)
+}
+
 // ensureSocketDir creates the directory the sockets live in, traversable by
 // the webserver and by nobody else.
 //
@@ -242,15 +257,10 @@ func Apply(ctx context.Context, p phpmgr.FPMProvider, pools []Pool) error {
 // customers have shell accounts, a world-traversable directory plus one
 // mistake in a socket mode is a way to run code as another customer. 0710
 // means the question never comes up.
-func ensureSocketDir(pools []Pool) error {
+func ensureSocketDir(owner string) error {
 	dir := phpmgr.FPMSocketDir
 	if err := os.MkdirAll(dir, 0o710); err != nil {
 		return fmt.Errorf("phpfpm: create %s: %w", dir, err)
-	}
-	owner := ""
-	for _, p := range pools {
-		owner = p.SocketOwner
-		break
 	}
 	if owner != "" {
 		g, err := user.LookupGroup(owner)
