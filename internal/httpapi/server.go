@@ -301,6 +301,8 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/cloudlinux/manager", s.handleCloudLinuxManagerInstall)
 				ar.Post("/cloudlinux/integration", s.handleCloudLinuxIntegration)
 				ar.Post("/cloudlinux/selector", s.handleCloudLinuxSelectorSetup)
+				ar.Get("/php/provider", s.handlePHPProvider)
+				ar.Post("/php/provider", s.handlePHPProviderSet)
 				ar.Get("/webserver/backends", s.handleWebserverBackends)
 				ar.Post("/webserver/switch", s.handleWebserverSwitch)
 				ar.Post("/webserver/litespeed/install", s.handleLiteSpeedInstall)

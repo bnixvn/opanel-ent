@@ -597,6 +597,24 @@ func (s *Service) SyncWebserver(ctx context.Context) error {
 // every site for the new server before it stops the old one. Splitting that
 // into "switch" and then "sync" would leave the host serving nothing in
 // between, which on a live server is the one thing that must not happen.
+// SetPHPProvider moves every site onto a different source of PHP.
+//
+// The whole estate again, and for the same reason a webserver switch sends
+// it: changing provider changes the socket every vhost proxies to, so the
+// vhosts are rewritten in the same operation. A host caught between the two
+// would have every PHP site pointing at a socket nothing is listening on.
+func (s *Service) SetPHPProvider(ctx context.Context, provider string) (actions.PHPProviderResult, error) {
+	specs, err := s.siteSpecs(ctx)
+	if err != nil {
+		return actions.PHPProviderResult{}, err
+	}
+	return agentclient.Call[actions.PHPProviderResult](ctx, s.agent, "php.set_provider", 1,
+		actions.PHPProviderRequest{
+			Provider:              provider,
+			WebserverApplyRequest: actions.WebserverApplyRequest{Config: s.cfg, Sites: specs},
+		})
+}
+
 func (s *Service) SwitchWebserver(ctx context.Context, backend string) (actions.WebserverSwitchResult, error) {
 	specs, err := s.siteSpecs(ctx)
 	if err != nil {

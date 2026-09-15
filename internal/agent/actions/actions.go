@@ -41,6 +41,7 @@ func RegisterAll(r *agent.Registry, deps Deps) {
 	registerPackages(r)
 	registerSites(r, deps)
 	registerWebserver(r, deps)
+	registerPHPProvider(r, deps)
 	registerLSWS(r)
 	registerCloudLinux(r)
 	registerPHPIni(r, deps)

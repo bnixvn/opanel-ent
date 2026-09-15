@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -75,46 +76,46 @@ func (p *Remi) Supported() []string { return append([]string(nil), remiVersions.
 
 // prefix is the collection directory for a version: /opt/remi/php83.
 func (p *Remi) prefix(version string) string {
-	return filepath.Join(p.root, "php"+pkgSuffix(version))
+	return path.Join(p.root, "php"+pkgSuffix(version))
 }
 
 // CLIBinary is the command-line interpreter for this version.
 func (p *Remi) CLIBinary(version string) string {
-	return filepath.Join(p.prefix(version), "root", "usr", "bin", "php")
+	return path.Join(p.prefix(version), "root", "usr", "bin", "php")
 }
 
 // FPMBinary is the pool manager itself.
 func (p *Remi) FPMBinary(version string) string {
-	return filepath.Join(p.prefix(version), "root", "usr", "sbin", "php-fpm")
+	return path.Join(p.prefix(version), "root", "usr", "sbin", "php-fpm")
 }
 
 // IniDropIn is the panel's override file inside the version's scan directory.
 func (p *Remi) IniDropIn(version string) string {
-	return filepath.Join("/etc/opt/remi", "php"+pkgSuffix(version), "php.d", "99-opanel.ini")
+	return path.Join("/etc/opt/remi", "php"+pkgSuffix(version), "php.d", "99-opanel.ini")
 }
 
 // IonCubeLoader is where the loader would be. Remi does not package ionCube;
 // the path is where a manually installed loader belongs, and Available
 // reports whether one is actually there.
 func (p *Remi) IonCubeLoader(version string) string {
-	return filepath.Join(p.prefix(version), "root", "usr", "lib64", "php", "modules", "ioncube_loader.so")
+	return path.Join(p.prefix(version), "root", "usr", "lib64", "php", "modules", "ioncube_loader.so")
 }
 
 // PoolDir is the directory this version's pool definitions live in.
 func (p *Remi) PoolDir(version string) string {
-	return filepath.Join("/etc/opt/remi", "php"+pkgSuffix(version), "php-fpm.d")
+	return path.Join("/etc/opt/remi", "php"+pkgSuffix(version), "php-fpm.d")
 }
 
 // PoolFile is the panel's definition for one pool. The opanel- prefix is what
 // makes pruning safe: the packaged www.conf sits in the same directory and
 // must survive.
 func (p *Remi) PoolFile(version, pool string) string {
-	return filepath.Join(p.PoolDir(version), "opanel-"+pool+".conf")
+	return path.Join(p.PoolDir(version), "opanel-"+pool+".conf")
 }
 
 // SocketPath is the unix socket a pool listens on.
 func (p *Remi) SocketPath(version, pool string) string {
-	return filepath.Join(FPMSocketDir, pool+"-"+pkgSuffix(version)+".sock")
+	return path.Join(FPMSocketDir, pool+"-"+pkgSuffix(version)+".sock")
 }
 
 // ServiceUnit is the systemd unit running this version's pools.

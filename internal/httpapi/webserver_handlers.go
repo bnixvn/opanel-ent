@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -81,5 +82,45 @@ func (s *Server) handleLiteSpeedInstall(w http.ResponseWriter, r *http.Request) 
 		licence = "none"
 	}
 	s.audit(r, "litespeed.install", res.Version, true, "licence "+licence)
+	writeJSON(w, http.StatusOK, res)
+}
+
+// phpProviderBody names the provider to move to.
+type phpProviderBody struct {
+	Provider string `json:"provider"`
+}
+
+// handlePHPProvider reports where this host's PHP comes from.
+func (s *Server) handlePHPProvider(w http.ResponseWriter, r *http.Request) {
+	st, err := agentclient.Call[actions.PHPProviderStatus](r.Context(), s.agent,
+		"php.provider", 1, struct{}{})
+	if err != nil {
+		s.agentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// handlePHPProviderSet moves every site onto a different source of PHP.
+//
+// The reason an operator does this is LiteSpeed: it can be handed one of
+// CloudLinux's interpreters and cannot be handed one of Remi's, so a host
+// that wants both servers to run the same build has to be on alt-php. It is
+// a migration, not a setting -- every pool is rewritten and every vhost
+// re-rendered -- which is why it takes minutes and has its own endpoint.
+func (s *Server) handlePHPProviderSet(w http.ResponseWriter, r *http.Request) {
+	var body phpProviderBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	allowLongResponse(w, actions.PHPProviderBudget+time.Minute)
+	res, err := s.sites.SetPHPProvider(r.Context(), body.Provider)
+	if err != nil {
+		s.audit(r, "php.provider", body.Provider, false, err.Error())
+		s.agentError(w, err)
+		return
+	}
+	s.audit(r, "php.provider", res.Provider, true,
+		fmt.Sprintf("moved %d site(s) from %s", res.Migrated, res.Previous))
 	writeJSON(w, http.StatusOK, res)
 }

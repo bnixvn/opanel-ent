@@ -11,7 +11,6 @@ import (
 
 	"github.com/bnixvn/opanel-ent/internal/acme"
 	"github.com/bnixvn/opanel-ent/internal/agent"
-	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/phpfpm"
 	"github.com/bnixvn/opanel-ent/internal/phpini"
 	"github.com/bnixvn/opanel-ent/internal/phpmgr"
@@ -414,22 +413,7 @@ func registerSites(r *agent.Registry, deps Deps) {
 		cfg := in.Config
 		cfg.WAFRulesFile = wafRulesIfInstalled()
 		cfg.ServerUser, cfg.ServerGroup = serverAccount(ws.Name(), cfg)
-		if st := pmaStatus(); st.Installed {
-			cfg.PMARoot = st.Root
-			cfg.PMAPort = PMAPort
-			if fp, ok := provider.(phpmgr.FPMProvider); ok {
-				cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
-			}
-		}
-		// CloudLinux Manager, when its files are here. Same shape as
-		// phpMyAdmin: a loopback vhost the panel proxies to.
-		if cloudlinux.ManagerInstalled() {
-			cfg.LVERoot = cloudlinux.ManagerRoot
-			cfg.LVEPort = cloudlinux.ManagerPort
-			if fp, ok := provider.(phpmgr.FPMProvider); ok {
-				cfg.LVEFPMSocket = fp.SocketPath(cloudlinux.ManagerPHPVersion, cloudlinux.ManagerPool)
-			}
-		}
+		panelAppConfig(&cfg, provider)
 
 		rendered, err := ws.Render(cfg, sites)
 		if err != nil {
@@ -439,13 +423,8 @@ func registerSites(r *agent.Registry, deps Deps) {
 		// vhost pointing at one that does not exist yet answers 503 for as
 		// long as the gap lasts.
 		if fp, ok := provider.(phpmgr.FPMProvider); ok {
-			pools := phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB())
-			if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
-				pools = append(pools, pmaPool(cfg))
-			}
-			if cfg.LVERoot != "" && cfg.LVEFPMSocket != "" {
-				pools = append(pools, lvePool(cfg))
-			}
+			pools := append(phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB()),
+				panelAppPools(cfg)...)
 			if err := phpfpm.Apply(ctx, fp, pools); err != nil {
 				return struct{}{}, err
 			}

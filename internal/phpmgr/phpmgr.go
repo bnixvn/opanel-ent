@@ -12,8 +12,11 @@ package phpmgr
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 // versionPattern accepts "8.4" and rejects anything that could become a path
@@ -124,11 +127,81 @@ func checkVersion(p Provider, v string) error {
 	return nil
 }
 
+// Providers lists every provider, in the order a person should be offered
+// them.
+var Providers = []string{ProviderRemi, ProviderAltPHP}
+
+// StateFile records which provider the host runs sites on.
+//
+// A file beside the webserver's, for the same reason: the agent is the side
+// that has to know and it has no database access. Written by the migration
+// action, which is root, and read on every render.
+const StateFile = "/var/lib/opanel/php/provider"
+
+// DefaultProvider is what a host runs when nothing has said otherwise.
+//
+// Remi, not alt-php, because a panel is installed before CloudLinux is --
+// that is the order the installer documents and the only order that works,
+// since CloudLinux is a conversion of the running system. A host that has
+// since been converted and migrated says so in the state file.
+const DefaultProvider = ProviderRemi
+
+// Active returns the provider the host is set to run sites on.
+//
+// A missing or unreadable state file gives the default rather than an error.
+// Guessing wrong here is not silent: every path this provider produces is
+// checked against the filesystem by Available, and a site pointed at a
+// version that is not installed fails the render rather than serving
+// something unexpected.
+func Active() string {
+	data, err := os.ReadFile(StateFile)
+	if err == nil {
+		name := strings.TrimSpace(string(data))
+		if slices.Contains(Providers, name) {
+			return name
+		}
+	}
+	return DefaultProvider
+}
+
+// SetActive records the provider the host now runs sites on.
+func SetActive(name string) error {
+	if !slices.Contains(Providers, name) {
+		return fmt.Errorf("php provider %q is not one of %v", name, Providers)
+	}
+	if err := os.MkdirAll(filepath.Dir(StateFile), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(StateFile, []byte(name+"\n"), 0o640)
+}
+
+// New builds the named provider.
+func New(name string) (Provider, error) {
+	switch name {
+	case ProviderRemi:
+		return NewRemi(), nil
+	case ProviderAltPHP:
+		return NewAltPHP(), nil
+	default:
+		return nil, fmt.Errorf("php provider %q is not one of %v", name, Providers)
+	}
+}
+
+// ActiveProvider builds the provider the host is set to run.
+func ActiveProvider() Provider {
+	p, err := New(Active())
+	if err != nil {
+		return NewRemi()
+	}
+	return p
+}
+
 // ForBackend returns the PHP provider that goes with a webserver.
 //
-// One answer today, because both servers the panel runs read the same
-// configuration and reach PHP the same way. The function stays because the
-// pairing is a real constraint rather than a coincidence: a server that
-// spawned its own interpreter would need a different provider, and the call
-// sites should already be asking.
-func ForBackend(string) Provider { return NewRemi() }
+// The same one either way, and that is the arrangement rather than a
+// coincidence: Apache reaches PHP through a pool socket and LiteSpeed spawns
+// lsphp from the same tree, so both run the identical build. A failover
+// between the two servers therefore cannot change which extensions a site
+// has or which php.ini it reads -- which is the property an automatic
+// failover lives or dies by.
+func ForBackend(string) Provider { return ActiveProvider() }

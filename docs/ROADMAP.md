@@ -31,11 +31,25 @@ it came through the panel. Two things their documentation gets wrong for
 CloudLinux 10: the domain field is `userDomain`, not `defaultDomain`, and
 `post_modify_admin.py create` takes `--name`, not `--username`.
 
-**3. alt-php in place of PHP-FPM.** CloudLinux's PHP, with the version picker
-in the panel pointing at it. Apache runs it through `mod_lsapi`. This is a
-provider swap, which is what `phpmgr.Provider` exists for: a site stores the
-string "8.4" and never a path, so changing where PHP comes from is a
-re-render of every vhost rather than a data migration.
+**3. alt-php in place of Remi.** Done, and not through `mod_lsapi`, which is
+what this originally said.
+
+mod_lsapi is CloudLinux's own way of running PHP under Apache, and it takes
+the version from the PHP Selector — whose unit is the **Linux account**, not
+the website. Measured: a vhost asking for 8.4 through mod_lsapi ran 8.1,
+because 8.1 was what the selector held for that uid, and setting a different
+one needs the account inside CageFS. A panel that sells PHP-version-per-site
+cannot express that. So sites stay pool-shaped and the version stays a
+property of the site; what changed is the build behind it.
+
+That is the part that matters for stage 4: LiteSpeed can be handed an
+alt-php and cannot be handed a Remi one. With both servers on `/opt/alt`,
+the only difference a failover makes is the SAPI itself — measured across a
+switch, `cgi-fcgi` against `litespeed`, and every other loaded extension
+identical.
+
+PHP Selector keeps its job: it is what a customer points their own shell and
+cron at, which is what it was built for.
 
 **4. LiteSpeed Enterprise, with the offset switch.** Only here, and only
 because of stage 3.

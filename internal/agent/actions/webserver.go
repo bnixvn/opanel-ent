@@ -117,20 +117,7 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 	cfg := in.Config
 	cfg.WAFRulesFile = wafRulesIfInstalled()
 	cfg.ServerUser, cfg.ServerGroup = serverAccount(in.Backend, cfg)
-	if st := pmaStatus(); st.Installed {
-		cfg.PMARoot = st.Root
-		cfg.PMAPort = PMAPort
-		if fp, ok := provider.(phpmgr.FPMProvider); ok {
-			cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
-		}
-	}
-	if cloudlinux.ManagerInstalled() {
-		cfg.LVERoot = cloudlinux.ManagerRoot
-		cfg.LVEPort = cloudlinux.ManagerPort
-		if fp, ok := provider.(phpmgr.FPMProvider); ok {
-			cfg.LVEFPMSocket = fp.SocketPath(cloudlinux.ManagerPHPVersion, cloudlinux.ManagerPool)
-		}
-	}
+	panelAppConfig(&cfg, provider)
 
 	rendered, err := target.Render(cfg, sites)
 	if err != nil {
@@ -141,13 +128,8 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 	// same pool under Apache and under LiteSpeed Enterprise, so switching
 	// between those two does not disturb a single PHP process.
 	if fp, ok := provider.(phpmgr.FPMProvider); ok {
-		pools := phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB())
-		if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
-			pools = append(pools, pmaPool(cfg))
-		}
-		if cfg.LVERoot != "" && cfg.LVEFPMSocket != "" {
-			pools = append(pools, lvePool(cfg))
-		}
+		pools := append(phpfpm.PoolsFor(fp, sites, cfg.ServerUser, hostMemoryMB()),
+			panelAppPools(cfg)...)
 		if err := phpfpm.Apply(ctx, fp, pools); err != nil {
 			return WebserverSwitchResult{}, err
 		}
@@ -339,6 +321,44 @@ func lvePool(cfg webserver.ServerConfig) phpfpm.Pool {
 		LogDir:      "/var/log/opanel",
 		SocketOwner: cfg.ServerUser,
 	}
+}
+
+// panelAppConfig fills in the loopback vhosts for the panel's own PHP tools.
+//
+// phpMyAdmin and CloudLinux Manager are PHP applications the panel serves
+// itself, and they need the same three things every PHP site does: a root, a
+// port and a pool socket. Gathered here rather than at each call site because
+// there are three -- apply, a webserver switch and a provider migration --
+// and a tool that got its socket from one provider while its pool was written
+// by another would 502 with nothing in any log to say why.
+func panelAppConfig(cfg *webserver.ServerConfig, p phpmgr.Provider) {
+	fp, pooled := p.(phpmgr.FPMProvider)
+	if st := pmaStatus(); st.Installed {
+		cfg.PMARoot = st.Root
+		cfg.PMAPort = PMAPort
+		if pooled {
+			cfg.PMAFPMSocket = fp.SocketPath(PMAPHPVersion, pmaPoolName)
+		}
+	}
+	if cloudlinux.ManagerInstalled() {
+		cfg.LVERoot = cloudlinux.ManagerRoot
+		cfg.LVEPort = cloudlinux.ManagerPort
+		if pooled {
+			cfg.LVEFPMSocket = fp.SocketPath(cloudlinux.ManagerPHPVersion, cloudlinux.ManagerPool)
+		}
+	}
+}
+
+// panelAppPools returns the pools those vhosts proxy to.
+func panelAppPools(cfg webserver.ServerConfig) []phpfpm.Pool {
+	var out []phpfpm.Pool
+	if cfg.PMARoot != "" && cfg.PMAFPMSocket != "" {
+		out = append(out, pmaPool(cfg))
+	}
+	if cfg.LVERoot != "" && cfg.LVEFPMSocket != "" {
+		out = append(out, lvePool(cfg))
+	}
+	return out
 }
 
 // serverAccount is the account the webserver's own workers run as.
