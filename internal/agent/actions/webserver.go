@@ -290,6 +290,7 @@ func pmaPool(cfg webserver.ServerConfig) phpfpm.Pool {
 		Group:       "opanel",
 		Socket:      cfg.PMAFPMSocket,
 		MaxChildren: 5,
+		Basedir:     cfg.PMARoot,
 		LogDir:      "/var/log/opanel",
 		SocketOwner: cfg.ServerUser,
 	}

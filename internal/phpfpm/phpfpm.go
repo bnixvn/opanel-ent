@@ -41,6 +41,13 @@ type Pool struct {
 	Group       string
 	Socket      string
 	MaxChildren int
+	// Basedir is the tree this pool's code may open, and the reason it is a
+	// field rather than derived from User: phpMyAdmin runs as the panel's own
+	// account but lives in /usr/share, so deriving it from the owner's home
+	// gave it an open_basedir that excluded its own index.php. PHP-FPM then
+	// could not stat the script and answered 404, which reads as a missing
+	// file rather than a policy refusing to look at one.
+	Basedir string
 	// LogDir is where this pool writes PHP's own errors. The site's log
 	// directory, not a shared one under /var/log: the customer can then read
 	// their own PHP errors through the file manager, and the space those
@@ -74,6 +81,10 @@ func PoolsFor(p phpmgr.FPMProvider, sites []webserver.Site, serverUser string, m
 			Group:       s.OwnerGroup,
 			Socket:      p.SocketPath(s.PHPVersion, s.Domain),
 			MaxChildren: maxChildren(memMB),
+			// A site may reach its owner's whole home: one customer often
+			// has several sites that share code, and they are all the same
+			// person.
+			Basedir:     "/home/" + s.OwnerUser,
 			LogDir:      s.LogDir(),
 			SocketOwner: serverUser,
 			Settings:    s.PHPSettings,
@@ -120,6 +131,9 @@ func Render(p phpmgr.FPMProvider, pool Pool) (webserver.File, error) {
 	}
 	if pool.LogDir == "" {
 		return webserver.File{}, fmt.Errorf("phpfpm: pool %q has no log directory", pool.Name)
+	}
+	if pool.Basedir == "" {
+		return webserver.File{}, fmt.Errorf("phpfpm: pool %q has no base directory", pool.Name)
 	}
 	if !webserver.ValidUnixName(pool.SocketOwner) {
 		return webserver.File{}, fmt.Errorf("phpfpm: pool %q has an unusable socket owner %q",

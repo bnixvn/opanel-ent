@@ -38,7 +38,7 @@ php_admin_flag[log_errors] = on
 ; directories it legitimately needs. It is the backstop for the case where
 ; the account boundary alone is not enough, such as a world-readable file
 ; somewhere else on the host.
-php_admin_value[open_basedir] = /home/{{ .User }}:/tmp:/usr/share/php:/var/lib/php
+php_admin_value[open_basedir] = {{ .Basedir }}:/tmp:/usr/share/php:/var/lib/php
 php_admin_value[upload_tmp_dir] = /tmp
 php_admin_value[session.save_path] = /tmp
 {{- if .Keys }}
