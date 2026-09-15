@@ -69,9 +69,11 @@ pub fn register(r: &mut Registry) {
 
 /// Reads /etc/os-release.
 ///
-/// CloudLinux is detected by its own release file rather than by os-release,
-/// which still says AlmaLinux after a conversion -- the ID does not change,
-/// so anything keying off it would decide wrongly.
+/// CloudLinux is detected by the presence of cldetect, never from os-release
+/// and not from a release file either. The CloudLinux 10 conversion runs the
+/// subsystem alongside the base distribution on purpose: os-release goes on
+/// saying AlmaLinux, and the vendor's own documentation says to ask cldetect
+/// instead. A release file was the CloudLinux 8 answer and is not this one.
 pub fn detect_distro() -> Distro {
     let mut d = Distro::default();
     let Ok(text) = std::fs::read_to_string("/etc/os-release") else {
@@ -93,7 +95,7 @@ pub fn detect_distro() -> Distro {
         .next()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    d.cloudlinux = std::path::Path::new("/etc/cloudlinux-release").exists();
+    d.cloudlinux = std::path::Path::new("/usr/bin/cldetect").exists();
     d
 }
 
