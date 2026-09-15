@@ -73,12 +73,33 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), commandBudget(flag.Args()))
 	defer cancel()
 
 	if err := dispatch(ctx, flag.Args()); err != nil {
 		fmt.Fprintln(os.Stderr, "opanelctl:", err)
 		os.Exit(1)
+	}
+}
+
+// commandBudget is how long a command is allowed to take.
+//
+// Ten minutes for everything was the rule, and it is wrong for the two
+// commands that install things: `cloudlinux setup` builds the CageFS skeleton
+// and then fetches two gigabytes of interpreters, and an installer on a slow
+// link is not much quicker. The deadline would have killed either one
+// part-way through a package transaction, which is the worst moment to be
+// interrupted -- and the error would have said "context deadline exceeded"
+// with nothing about what was actually happening.
+func commandBudget(args []string) time.Duration {
+	if len(args) == 0 {
+		return 10 * time.Minute
+	}
+	switch args[0] {
+	case "cloudlinux", "install":
+		return 2 * time.Hour
+	default:
+		return 10 * time.Minute
 	}
 }
 
@@ -751,7 +772,7 @@ func cmdCloudLinux(ctx context.Context, args []string) error {
 // touches running sites.
 func cloudLinuxSetup(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("cloudlinux setup", flag.ContinueOnError)
-	skipSelector := fs.Bool("skip-selector", false, "do not install alt-php or set up PHP Selector")
+	skipSelector := fs.Bool("skip-selector", false, "do not install CageFS, alt-php or PHP Selector")
 	skipManager := fs.Bool("skip-manager", false, "do not install CloudLinux Manager")
 	stay := fs.Bool("stay-on-remi", false, "leave sites on Remi's PHP instead of moving them to alt-php")
 	if err := fs.Parse(args); err != nil {
@@ -776,7 +797,9 @@ func cloudLinuxSetup(ctx context.Context, args []string) error {
 	fmt.Println("    CloudLinux's tools can read this panel's accounts, domains and packages.")
 
 	if !*skipSelector {
-		fmt.Println("==> alt-php and PHP Selector (this installs about 2 GB and takes a few minutes)")
+		fmt.Println("==> CageFS, alt-php and PHP Selector")
+		fmt.Println("    Several gigabytes and several minutes: the cage skeleton, then")
+		fmt.Println("    fifteen interpreters, then the skeleton again around them.")
 		st, err := agentclient.Call[cloudlinux.SelectorStatus](ctx, ac, "cl.selector_setup", 1, struct{}{})
 		if err != nil {
 			return fmt.Errorf("set up PHP Selector: %w", err)

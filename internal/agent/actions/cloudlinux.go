@@ -157,15 +157,25 @@ func registerCloudLinux(r *agent.Registry) {
 			return clStatus(ctx), nil
 		})
 
-	// Slow, and by a wide margin the slowest thing on this page: it installs
-	// about two gigabytes of interpreters and then rebuilds the CageFS
-	// skeleton around them.
-	agent.RegisterSlow(r, "cl.selector_setup", 1, 40*time.Minute,
+	// By a wide margin the slowest thing the panel does: CageFS's skeleton is
+	// a few gigabytes of the system copied into a template, and alt-php is
+	// two more of interpreters, and then the skeleton is refreshed around
+	// them.
+	agent.RegisterSlow(r, "cl.selector_setup", 1, 60*time.Minute,
 		func(ctx context.Context, _ struct{}) (cloudlinux.SelectorStatus, error) {
 			if !fileExists(clDetect) {
 				return cloudlinux.SelectorStatus{}, &agent.DeniedError{
 					Reason: "CloudLinux is not installed on this server",
 				}
+			}
+			install := func(ctx context.Context, name string) error {
+				return pkgmgr.Install(ctx, name)
+			}
+			// CageFS first, because the selector is per-account isolation and
+			// cannot exist without it. cldeploy does not install it, so on a
+			// freshly converted host this is the step that puts it there.
+			if err := cloudlinux.InstallCageFS(ctx, install); err != nil {
+				return cloudlinux.SelectorStatus{}, err
 			}
 			err := cloudlinux.SetupSelector(ctx, func(ctx context.Context, group string) error {
 				return pkgmgr.InstallGroup(ctx, group)

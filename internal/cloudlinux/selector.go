@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
 // PHP Selector, as CloudLinux installs it on a panel they do not support.
@@ -26,6 +28,9 @@ const (
 	selectorCtlPath  = "/usr/bin/selectorctl"
 	altPHPGroup      = "alt-php"
 	selectorSetupArg = "--setup-cl-selector"
+	// cageFSSkeleton is the template every cage is built from. Its presence
+	// is how "has --init already run here?" is answered.
+	cageFSSkeleton = "/usr/share/cagefs-skeleton"
 )
 
 // nativeCandidates are the interpreters CloudLinux asks about, and where the
@@ -114,6 +119,55 @@ func versionParts(s string) [2]int {
 	return out
 }
 
+// InstallCageFS puts CageFS on a converted host and builds its skeleton.
+//
+// cldeploy does not install it. A freshly converted host has lve-utils and
+// lvemanager and neither cagefs nor alt-php, so every step that assumes
+// CageFS -- PHP Selector above all, which cannot exist without it -- fails on
+// exactly the host the documented sequence produces. Found by running that
+// sequence.
+//
+// What this does not do is put any account inside a cage. That is a change in
+// what a customer's shell and file manager can see, and it belongs to a
+// decision about one account rather than to setting the subsystem up.
+func InstallCageFS(ctx context.Context, install func(context.Context, string) error) error {
+	if !fileExists(cageFSCtl) {
+		if install == nil {
+			return fmt.Errorf("cloudlinux: %s is not here and nothing was given to install it", cageFSCtl)
+		}
+		if err := install(ctx, "cagefs"); err != nil {
+			return fmt.Errorf("cloudlinux: install cagefs: %w", err)
+		}
+	}
+	if !fileExists(cageFSCtl) {
+		return fmt.Errorf("cloudlinux: cagefs installed but %s is still not there", cageFSCtl)
+	}
+
+	// --init builds the skeleton: a few gigabytes of the system copied into
+	// the template every cage is made from, and several minutes of work.
+	//
+	// Only when there is not one already. --init is not idempotent -- it
+	// refuses outright on a host that has a skeleton and says to use --reinit
+	// -- so running it unconditionally turns the second run of a resumable
+	// command into a failure. Refreshing an existing skeleton is what
+	// --force-update does, and SetupSelector does that after the interpreters
+	// are in, which is the moment it actually matters.
+	if !dirExists(cageFSSkeleton) {
+		if out, err := exec.CommandContext(ctx, cageFSCtl, "--init").CombinedOutput(); err != nil {
+			return fmt.Errorf("cloudlinux: build the CageFS skeleton: %w (%s)", err, lastLine(string(out)))
+		}
+	}
+
+	// The service last, and this order is the point. Starting it while --init
+	// is still building leaves it restarting against a half-built skeleton
+	// until it hits systemd's rate limit and gives up -- a failed unit whose
+	// message says nothing about why.
+	if err := svc.Enable(ctx, "cagefs", true); err != nil {
+		return fmt.Errorf("cloudlinux: start cagefs: %w", err)
+	}
+	return nil
+}
+
 // SetupSelector installs the alt-php interpreters and registers them.
 //
 // Installing the whole group rather than a list the panel chooses: the point
@@ -146,21 +200,35 @@ func SetupSelector(ctx context.Context, install func(context.Context, string) er
 	return nil
 }
 
-// writeNativeConf tells the selector what "native" means on this host.
+// writeNativeConf tells the selector what "native" means on this host, when
+// anything does.
 //
-// Measured rather than assumed. The native interpreter is whatever the
-// distribution put at /usr/bin/php, which on this panel is not the version
-// sites run: those get a per-site PHP-FPM pool. A customer choosing "native"
-// is choosing the system one, and the file has to say which that is or the
-// choice resolves to nothing.
+// Measured rather than assumed, and optional rather than required. "Native" in
+// CloudLinux's sense is the interpreter the distribution installed -- and a
+// host running this panel may not have one at all: PHP comes from Remi under
+// /opt/remi or from alt-php under /opt/alt, and neither puts anything at
+// /usr/bin/php. The first fresh host to reach this step had no system PHP and
+// the step refused to continue, which is the wrong answer to a question whose
+// honest reply is "there is no native PHP here".
+//
+// So an absent system PHP writes no file and stops nothing. The selector then
+// offers the alt-php versions and no "native" entry, which is exactly true:
+// every interpreter a customer can choose is one of CloudLinux's. Inventing a
+// native by pointing it at the panel's own default would be worse -- it would
+// make "native" and "8.4" two names for one thing, and hide the fact that the
+// distribution's PHP is not installed.
+// nativeConfHeader explains the file to whoever opens it next.
+const nativeConfHeader = `# Written by OPanel. Do not edit.
+#
+# What PHP Selector hands a customer who chooses "native": the interpreter the
+# distribution installed, not the one this panel runs sites under. Only paths
+# that exist are listed -- a path here that is not there is offered to a
+# customer as a working choice and then fails.
+`
+
 func writeNativeConf() error {
 	var b strings.Builder
-	b.WriteString("# Written by OPanel. Do not edit.\n")
-	b.WriteString("#\n")
-	b.WriteString("# What PHP Selector hands a customer who chooses \"native\": the\n")
-	b.WriteString("# interpreter the distribution installed, not the one this panel runs\n")
-	b.WriteString("# sites under. Only paths that exist are listed -- a path here that is\n")
-	b.WriteString("# not there is offered as a working choice and then fails.\n")
+	b.WriteString(nativeConfHeader)
 	found := false
 	for _, c := range nativeCandidates {
 		if !fileExists(c.path) {
@@ -170,7 +238,12 @@ func writeNativeConf() error {
 		found = true
 	}
 	if !found {
-		return fmt.Errorf("cloudlinux: no system PHP found, so \"native\" would mean nothing; install php-cli first")
+		// Nothing to declare. Any stale file goes with it, so a host that
+		// loses its system PHP does not keep offering it.
+		if err := os.Remove(nativeConfPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cloudlinux: remove the stale %s: %w", nativeConfPath, err)
+		}
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(nativeConfPath), 0o755); err != nil {
 		return err
@@ -179,4 +252,10 @@ func writeNativeConf() error {
 		return fmt.Errorf("cloudlinux: write %s: %w", nativeConfPath, err)
 	}
 	return nil
+}
+
+// dirExists reports whether p is a directory.
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
 }
