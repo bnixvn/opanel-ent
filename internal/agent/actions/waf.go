@@ -31,18 +31,12 @@ type wafLayout struct {
 	Package string
 }
 
-func wafPaths() wafLayout {
-	if backends.Active() == webserver.BackendLSWS {
-		const root = "/usr/local/lsws"
-		return wafLayout{
-			Dir:       root + "/conf/opanel/waf",
-			RulesFile: root + "/conf/opanel/waf/rules.conf",
-			AuditLog:  root + "/logs/modsec_audit.log",
-			Module:    root + "/modules/mod_security.so",
-			Package:   "ols-modsecurity",
-		}
-	}
-	return wafLayout{
+func wafPaths() wafLayout { return wafPathsFor(backends.Active()) }
+
+// wafPathsFor is wafPaths with the backend as an argument, so the pairing can
+// be tested without a state file.
+func wafPathsFor(backend string) wafLayout {
+	l := wafLayout{
 		Dir:       "/etc/httpd/opanel/waf",
 		RulesFile: "/etc/httpd/opanel/waf/rules.conf",
 		AuditLog:  "/var/log/httpd/modsec_audit.log",
@@ -51,6 +45,32 @@ func wafPaths() wafLayout {
 		Module:  "/usr/lib64/httpd/modules/mod_security2.so",
 		Package: "mod_security",
 	}
+	if backend == webserver.BackendLSWS {
+		// One rules directory, Apache's, for both servers -- because
+		// LiteSpeed Enterprise reads Apache's configuration, which is the
+		// whole reason the two share a renderer. Rules written into a
+		// LiteSpeed-specific directory would be rules nothing includes.
+		//
+		// The engine is built into LiteSpeed Enterprise rather than being a
+		// module on disk: it logs "[MODSEC] created offloader" at startup and
+		// there is nothing to install. This used to look for
+		// /usr/local/lsws/modules/mod_security.so and offer to install
+		// "ols-modsecurity" -- OpenLiteSpeed's package, for a server this
+		// panel no longer supports, from a repository that no longer carries
+		// it. So switching to LiteSpeed reported a host with 658 rules
+		// loaded as having no firewall at all, and offered to fix it by
+		// installing a package that does not exist.
+		l.Module = lswsBinary
+		l.Package = ""
+		// LiteSpeed's own error log, not the audit log the rules name.
+		// /var/log/httpd is 0700 root, and LiteSpeed's workers run as nobody,
+		// so SecAuditLog there is a file they cannot open -- it stays empty
+		// and the events page stays blank while the firewall is in fact
+		// blocking. LiteSpeed writes every block into its error log anyway,
+		// in ModSecurity's own one-line form.
+		l.AuditLog = "/usr/local/lsws/logs/error.log"
+	}
+	return l
 }
 
 // WAF modes.
@@ -183,10 +203,14 @@ const crsURL = "https://github.com/coreruleset/coreruleset/releases/download/v4.
 func installCRS(ctx context.Context) error {
 	paths := wafPaths()
 	if _, err := os.Stat(paths.Module); err != nil {
-		// Install the engine rather than refusing. It is a package on both
-		// servers, and "install the web application firewall" plainly means
-		// the engine as well as the rules -- being told to go and run dnf
-		// first is a step that exists only because nobody wrote it down.
+		if paths.Package == "" {
+			return fmt.Errorf("this server carries its own ModSecurity and %s is not there, "+
+				"so it is not running", paths.Module)
+		}
+		// Install the engine rather than refusing. On Apache it is a package,
+		// and "install the web application firewall" plainly means the engine
+		// as well as the rules -- being told to go and run dnf first is a step
+		// that exists only because nobody wrote it down.
 		if err := pkgmgr.Install(ctx, paths.Package); err != nil {
 			return fmt.Errorf("install %s, the ModSecurity engine: %w", paths.Package, err)
 		}
@@ -312,9 +336,16 @@ func readWAFEvents(limit int) []WAFEvent {
 		return nil
 	}
 
+	return parseWAFEvents(string(buf), limit)
+}
+
+// parseWAFEvents reads both shapes ModSecurity records a block in: the
+// multi-line audit record, and the single error-log line each server also
+// writes.
+func parseWAFEvents(text string, limit int) []WAFEvent {
 	var out []WAFEvent
 	var current WAFEvent
-	for _, line := range strings.Split(string(buf), "\n") {
+	for _, line := range strings.Split(text, "\n") {
 		switch {
 		case strings.HasPrefix(line, "--") && strings.HasSuffix(line, "-A--"):
 			if current.RuleID != "" {
@@ -333,6 +364,23 @@ func readWAFEvents(limit int) []WAFEvent {
 			current.RuleID = between(line, "[id \"", "\"]")
 			current.Message = between(line, "[msg \"", "\"]")
 			current.Blocked = strings.Contains(line, "Access denied")
+			// An error-log line carries the whole event on its own, rather
+			// than being one part of a multi-line audit record. Both servers
+			// write this form -- it is where LiteSpeed's blocks appear, since
+			// it cannot open the audit log at all -- so it is finished here
+			// and the next line starts fresh.
+			if h := between(line, "[hostname \"", "\"]"); h != "" {
+				current.Host = h
+				current.URI = between(line, "[uri \"", "\"]")
+				if c := between(line, "[client ", "]"); c != "" {
+					current.ClientIP = strings.Fields(c)[0]
+				}
+				if t := between(line, "[", "]"); strings.Contains(t, ":") {
+					current.At = t
+				}
+				out = append(out, current)
+				current = WAFEvent{}
+			}
 		case strings.HasPrefix(line, "["):
 			// The -A-- header line carries the timestamp and client address.
 			fields := strings.Fields(line)
