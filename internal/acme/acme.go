@@ -94,6 +94,13 @@ func (m *Manager) Issue(ctx context.Context, domains []string) (*Certificate, er
 			return nil, err
 		}
 	}
+	// Before the CA is involved, because the CA's version of this failure
+	// names an IP address inside a sentence about secondary validation and
+	// reads like a webserver fault.
+	if err := m.Preflight(ctx, domains); err != nil {
+		return nil, err
+	}
+
 	client, err := m.client()
 	if err != nil {
 		return nil, err

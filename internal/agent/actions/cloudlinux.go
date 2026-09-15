@@ -210,10 +210,9 @@ func clStatus(ctx context.Context) CLStatus {
 	out.Licence = firstLineOf(ctx, clDetect, "--check-license")
 
 	// The module, not the tool. lvectl is installed by a package; the limits
-	// are only real when the kernel is enforcing them.
-	if data, err := os.ReadFile("/proc/modules"); err == nil {
-		out.LVE = strings.Contains(string(data), "lve ")
-	}
+	// are only real when the kernel is enforcing them, and "recorded but not
+	// enforced" is the one state on this page that looks fine and is not.
+	out.LVE = lveModuleLoaded()
 	return out
 }
 
@@ -296,4 +295,43 @@ func clUsage(ctx context.Context, period string) ([]CLUsage, error) {
 		})
 	}
 	return out, nil
+}
+
+// lveModuleNames are what the kernel calls CloudLinux's LVE module.
+//
+// Two of them, because the name changed: CloudLinux 7 and 8 load "lve" and
+// CloudLinux 10 loads "kmodlve". Measured on a converted host -- lsmod says
+// kmodlve, and dmesg says "lve driver register status 0" under that name.
+var lveModuleNames = []string{"lve", "kmodlve"}
+
+// lveModuleLoaded reports whether the kernel is enforcing LVE limits.
+//
+// Field-by-field rather than a substring search of the whole file. The
+// original here asked whether /proc/modules contained "lve ", which was true
+// on this host only because "kmodlve " ends with it -- the right answer by
+// accident, and one that would equally have been given by a module called
+// "solve" or "valve". Anchoring to the start of a line instead, which is the
+// obvious correction, would have been wrong the other way: it reports no LVE
+// on every CloudLinux 10 host.
+func lveModuleLoaded() bool { return lveLoadedIn("/proc/modules") }
+
+// lveLoadedIn is lveModuleLoaded with the path as an argument, so the parsing
+// can be tested against the contents of a real host's /proc/modules.
+func lveLoadedIn(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		name, _, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		for _, want := range lveModuleNames {
+			if name == want {
+				return true
+			}
+		}
+	}
+	return false
 }
