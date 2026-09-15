@@ -255,6 +255,11 @@ func resolve(p phpmgr.Provider, specs []SiteSpec) ([]webserver.Site, error) {
 			if fp, ok := p.(phpmgr.FPMProvider); ok {
 				s.FPMSocket = fp.SocketPath(sp.PHPVersion, sp.Domain)
 			}
+			// What the other server would run this site with. Emitted into
+			// every vhost whether or not LiteSpeed is the one running, so a
+			// switch is a daemon starting rather than a re-render -- which is
+			// what makes an automatic failover possible at all.
+			s.LSPHPHandler = lsphpHandler(sp.PHPVersion)
 		}
 		if err := s.Validate(); err != nil {
 			return nil, fmt.Errorf("site %q: %w", sp.Domain, err)

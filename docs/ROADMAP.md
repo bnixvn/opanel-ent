@@ -38,25 +38,39 @@ string "8.4" and never a path, so changing where PHP comes from is a
 re-render of every vhost rather than a data migration.
 
 **4. LiteSpeed Enterprise, with the offset switch.** Only here, and only
-because of stage 3. Measured on AlmaLinux 10 before deciding this order:
+because of stage 3.
 
-- LiteSpeed ignores Apache's `SetHandler proxy:unix:` for a PHP-FPM socket
-  and serves the `.php` file instead — the source, and whatever credentials
-  are at the top of it.
-- It ignores `SetHandler proxy:fcgi://` over TCP the same way.
-- Its own `lsphp` packages for el10 are 8.1, 8.2, 8.3 and 8.5. No 8.4, which
-  is the panel's default, and no 7.4.
+A correction first, because an earlier version of this file got it wrong and
+the code repeated the mistake in a message shown to operators. It said
+LiteSpeed serves the `.php` source when it meets Apache's PHP-FPM handler.
+It does not. Measured on CloudLinux 10 with LiteSpeed Enterprise 6.3.3, four
+configurations of the same vhost:
 
-So on plain AlmaLinux, preferring LiteSpeed means preferring a server that
-cannot serve the sites. alt-php is what fixes that: LiteSpeed's own
-documentation for the panels it supports uses
-`AddHandler application/x-httpd-alt-php85`, which is CloudLinux's PHP.
+| Vhost | What LiteSpeed does |
+|---|---|
+| `SetHandler proxy:unix:` alone | Runs the `lsphp` it ships with — **7.2.34** — and answers 200 |
+| plus `AddHandler application/x-httpd-alt-php84` | Runs alt-php 8.4.25, ini `/opt/alt/php84/etc/php.ini`, as the site's uid |
+| handler naming an uninstalled version | **403**. Fails closed |
+| handler naming a different installed version | Runs that version — the handler decides |
 
-What does work today, and is what stage 4 is built on: `<IfModule LiteSpeed>`
-is evaluated by LiteSpeed and skipped by Apache, and Apache accepts a config
-file containing one (`httpd -t`, Syntax OK). One vhost can therefore carry
-both handlers — Apache's, and LiteSpeed's — with neither server seeing the
-other's.
+So the hazard is not a source leak; it is a site written for 8.4 silently
+running on an interpreter from 2019, returning 200 for every request. Less
+alarming, equally worth refusing, and a completely different thing to tell
+an operator. `canServePHP` now says the true one.
+
+The mechanism stage 4 is built on: `<IfModule LiteSpeed>` is evaluated by
+LiteSpeed and skipped by Apache — Apache has no module of that name — and
+`httpd -t` accepts a file containing one. Every PHP vhost therefore carries
+both handlers, so switching server starts a daemon instead of re-rendering
+the estate. That is what makes an automatic failover possible: the
+configuration for the server that is *not* running is already on disk and
+already correct.
+
+Still outstanding, and the reason stage 3 is not finished: Apache runs
+**Remi** 8.4 and LiteSpeed runs **alt-php** 8.4. Same version, different
+builds, different extension sets and different `php.ini`. A failover would
+change what a site's PHP can do. One provider has to win, and it has to be
+alt-php, because LiteSpeed cannot be given the Remi one.
 
 ## The offset switch, and failing over
 

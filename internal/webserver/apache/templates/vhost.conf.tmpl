@@ -107,6 +107,21 @@
     <FilesMatch "\.php$">
         SetHandler "proxy:unix:{{ .Site.FPMSocket }}|fcgi://localhost"
     </FilesMatch>
+{{- if .Site.LSPHPHandler }}
+
+    # The same site, for the other server. Apache has no module called
+    # LiteSpeed, so it skips this block entirely; LiteSpeed Enterprise
+    # evaluates it and uses it in place of the SetHandler above, which it
+    # cannot follow. One vhost, an interpreter for whichever server is
+    # running, and a switch between them that moves no files.
+    #
+    # Without it LiteSpeed does not refuse the site -- it runs the
+    # interpreter it ships with, 7.2, and says nothing. A site written for
+    # {{ .Site.PHPVersion }} would quietly run on that instead.
+    <IfModule LiteSpeed>
+        AddHandler {{ .Site.LSPHPHandler }} .php
+    </IfModule>
+{{- end }}
 
 {{- if eq .Site.AppType "wordpress" }}
 

@@ -200,35 +200,39 @@ func switchBackend(ctx context.Context, in WebserverSwitchRequest) (WebserverSwi
 	}, nil
 }
 
-// canServePHP refuses a switch that would stop PHP being PHP.
+// canServePHP refuses a switch that would stop PHP being the PHP the site
+// asked for.
 //
 // LiteSpeed Enterprise reads Apache's configuration -- document roots,
-// hostnames, rewrites, all of it -- but it does not honour the handler that
-// sends .php to a PHP-FPM pool over a unix socket. What it does instead is
-// serve the file: a request for index.php comes back as a download of the
-// source, including whatever credentials are at the top of it.
+// hostnames, rewrites, all of it -- but not the handler that sends .php to a
+// PHP-FPM pool over a unix socket. Measured on a real host, what it does
+// instead is run the lsphp it ships with, which is 7.2.34, and answer 200:
+// not a source leak, but a site written for 8.4 silently running on an
+// interpreter from 2019, which is the kind of failure that surfaces as
+// corrupted data rather than as an error.
 //
-// That is worse than refusing, and it is not the kind of failure an operator
-// notices from the panel, so the switch is blocked while any site runs PHP.
-// Static sites are unaffected and switch normally.
+// The fix is a handler of LiteSpeed's own in the vhost, which the renderer
+// emits whenever the host has an alt-php for that site's version. So this
+// asks about the interpreter rather than about PHP: a site LiteSpeed can run
+// correctly may switch, and one it cannot may not.
 func canServePHP(backend string, sites []webserver.Site) error {
 	if backend != webserver.BackendLSWS {
 		return nil
 	}
-	var php []string
+	var orphaned []string
 	for _, s := range sites {
-		if s.NeedsPHP() {
-			php = append(php, s.Domain)
+		if s.NeedsPHP() && s.LSPHPHandler == "" {
+			orphaned = append(orphaned, s.Domain+" (PHP "+s.PHPVersion+")")
 		}
 	}
-	if len(php) == 0 {
+	if len(orphaned) == 0 {
 		return nil
 	}
 	return &agent.DeniedError{Reason: fmt.Sprintf(
-		"LiteSpeed Enterprise reads this panel's Apache configuration but not its PHP-FPM "+
-			"handler, so %d site(s) including %s would have their PHP source served instead "+
-			"of run. Switch back to Apache to host PHP; LiteSpeed is usable here for static "+
-			"sites until the panel can give it an interpreter of its own", len(php), php[0])}
+		"LiteSpeed Enterprise has no interpreter for %d site(s) on this host, including %s. "+
+			"It would run them on the PHP 7.2 it ships with and report success. Install the "+
+			"matching alt-php (CloudLinux ships 5.3 to 8.5) and switch again, or stay on "+
+			"Apache", len(orphaned), orphaned[0])}
 }
 
 // portsOf is what the new server has to be able to bind.

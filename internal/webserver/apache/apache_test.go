@@ -224,3 +224,38 @@ func TestNoManagerVhostWhenNotInstalled(t *testing.T) {
 		t.Errorf("the Manager was rendered on a host that does not have it:\n%s", main)
 	}
 }
+
+// Apache and LiteSpeed reach PHP by different routes, and the vhost carries
+// both so that switching server starts a daemon rather than re-rendering the
+// estate. The block has to be inside <IfModule LiteSpeed>: Apache has no such
+// module and skips it, which is the only reason one file can serve both.
+func TestPHPVhostCarriesBothInterpreters(t *testing.T) {
+	site := testSite("both.example", "cust", webserver.AppPHP, "8.4")
+	site.LSPHPHandler = "application/x-httpd-alt-php84"
+
+	r := render(t, webserver.DefaultServerConfig(), []webserver.Site{site})
+	out := string(siteVhost(t, r, site.Domain))
+
+	if !strings.Contains(out, "SetHandler \"proxy:unix:") {
+		t.Errorf("Apache lost its handler:\n%s", out)
+	}
+	i := strings.Index(out, "<IfModule LiteSpeed>")
+	j := strings.Index(out, "AddHandler application/x-httpd-alt-php84 .php")
+	k := strings.Index(out, "</IfModule>")
+	if i < 0 || j < i || k < j {
+		t.Errorf("the LiteSpeed handler is missing or outside its IfModule:\n%s", out)
+	}
+}
+
+// A host with no alt-php for the site's version gets no block at all, rather
+// than one naming an interpreter that is not there. Both are refusals, but
+// this one is the panel's, made before the switch, with a message; the other
+// is a 403 from LiteSpeed to the visitor.
+func TestNoLiteSpeedBlockWithoutAnInterpreter(t *testing.T) {
+	site := testSite("only-apache.example", "cust", webserver.AppPHP, "8.4")
+	r := render(t, webserver.DefaultServerConfig(), []webserver.Site{site})
+	out := string(siteVhost(t, r, site.Domain))
+	if strings.Contains(out, "LiteSpeed") {
+		t.Errorf("emitted a LiteSpeed handler for a version the host does not have:\n%s", out)
+	}
+}

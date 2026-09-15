@@ -69,6 +69,10 @@ func ValidDomain(d string) bool {
 	return len(d) <= 253 && domainPattern.MatchString(d)
 }
 
+// handlerPattern matches a MIME-shaped handler name and nothing else, so a
+// value reaching a config file cannot carry whitespace, a newline or a quote.
+var handlerPattern = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9][a-z0-9.+-]{0,63}$`)
+
 // unixNamePattern matches a Linux account name the panel may run PHP as.
 var unixNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
@@ -100,6 +104,21 @@ type Site struct {
 	PHPVersion string
 	// FPMSocket is the pool the server proxies to.
 	FPMSocket string
+	// LSPHPHandler is the handler name LiteSpeed Enterprise runs this site's
+	// PHP under, empty when the host has no interpreter LiteSpeed can use
+	// for this version.
+	//
+	// Passed in rather than worked out here, like WAFRulesFile and for the
+	// same reason: whether alt-php 8.4 is installed is a fact about a
+	// machine, and a renderer that looks at the filesystem produces
+	// different output on different hosts.
+	//
+	// Empty is not merely "no acceleration". Measured on a real host:
+	// LiteSpeed serving a vhost with no handler of its own does not serve
+	// the source -- it runs the interpreter it ships with, which is 7.2 --
+	// so a site written for 8.4 silently runs on an interpreter five years
+	// older. That is why an empty value blocks the switch.
+	LSPHPHandler string
 
 	SSLEnabled bool
 	CertFile   string
@@ -170,6 +189,18 @@ func (s Site) Validate() error {
 	if s.FPMSocket != "" {
 		if err := validAbsPath(s.FPMSocket, "php-fpm socket"); err != nil {
 			return err
+		}
+	}
+	if s.LSPHPHandler != "" {
+		if !s.NeedsPHP() {
+			return fmt.Errorf("static site %q must not carry a LiteSpeed handler", s.Domain)
+		}
+		// The handler name is written into a config file as a directive
+		// argument, so it is checked here for the same reason php.ini
+		// overrides are: this is the last place a second directive smuggled
+		// into a value can be stopped.
+		if !handlerPattern.MatchString(s.LSPHPHandler) {
+			return fmt.Errorf("site %q: %q is not a valid handler name", s.Domain, s.LSPHPHandler)
 		}
 	}
 	if s.SSLEnabled {
