@@ -243,6 +243,7 @@ type ServerConfig struct {
 	PMAPort int
 	// PMAFPMSocket is the pool the server proxies it to.
 	PMAFPMSocket string
+
 	// WAFRulesFile is the ModSecurity configuration to load, empty when the
 	// engine or its rules are not installed.
 	//

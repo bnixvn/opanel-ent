@@ -18,6 +18,11 @@ const (
 	scriptRunner = "/usr/local/bin/opanelctl"
 )
 
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
 // Installed reports whether the integration file is in place.
 func Installed() bool {
 	st, err := os.Stat(ConfigPath)
@@ -59,6 +64,13 @@ func Install() error {
 	b.WriteString("\n[integration_scripts]\n")
 	for _, name := range Scripts {
 		fmt.Fprintf(&b, "%s = %s\n", name, filepath.Join(ScriptDir, name))
+	}
+	// The manager's own section, when its files are here. CloudLinux reads
+	// both from one file, and the installer that copies the manager is the
+	// thing that reads base_path out of it -- so the section has to exist
+	// before that runs, not after.
+	if ManagerInstalled() || fileExists(pluginInstall) {
+		b.WriteString(managerSection())
 	}
 	if err := os.WriteFile(ConfigPath, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("cloudlinux: write %s: %w", ConfigPath, err)

@@ -78,3 +78,16 @@ func (s *Server) handleCloudLinuxIntegration(w http.ResponseWriter, r *http.Requ
 	s.audit(r, "cloudlinux.integration", "install", true, "")
 	writeJSON(w, http.StatusOK, status)
 }
+
+// handleCloudLinuxManagerInstall puts CloudLinux Manager in place and starts
+// the service that serves it.
+func (s *Server) handleCloudLinuxManagerInstall(w http.ResponseWriter, r *http.Request) {
+	status, err := agentclient.Call[actions.CLStatus](r.Context(), s.agent,
+		"cl.manager_install", 1, struct{}{})
+	if err != nil {
+		s.agentError(w, err)
+		return
+	}
+	s.audit(r, "cloudlinux.manager", "install", true, "")
+	writeJSON(w, http.StatusOK, status)
+}

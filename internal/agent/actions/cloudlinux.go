@@ -12,6 +12,7 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent"
 	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/platform/run"
+	"github.com/bnixvn/opanel-ent/internal/platform/svc"
 )
 
 // The CloudLinux tools this panel reads. Each is optional: the subsystem can
@@ -38,6 +39,11 @@ type CLStatus struct {
 	LVE bool `json:"lve"`
 	// Integration is whether CloudLinux can read this panel.
 	Integration bool `json:"integration"`
+	// Manager is whether CloudLinux's own interface is installed, and
+	// ManagerRunning whether the service that serves it is up. Both, because
+	// installed-and-stopped is a real state and looks like neither.
+	Manager        bool `json:"manager"`
+	ManagerRunning bool `json:"manager_running"`
 	// Tools reports which parts are installed, so the page can say why
 	// something is missing rather than leaving a blank.
 	Tools map[string]bool `json:"tools"`
@@ -128,6 +134,25 @@ func registerCloudLinux(r *agent.Registry) {
 		}{usage}, err
 	})
 
+	// Slow: the vendor's installer copies its whole interface and can pull
+	// packages while doing it.
+	agent.RegisterSlow(r, "cl.manager_install", 1, 15*time.Minute,
+		func(ctx context.Context, _ struct{}) (CLStatus, error) {
+			if !fileExists(clDetect) {
+				return CLStatus{}, &agent.DeniedError{Reason: "CloudLinux is not installed on this server"}
+			}
+			if err := cloudlinux.InstallManager(); err != nil {
+				return CLStatus{}, err
+			}
+			// Its own service serves it. Started here rather than left to the
+			// operator: an interface that is installed and not running is the
+			// same as one that is not installed, from the page's point of view.
+			if err := svc.Enable(ctx, "lvemanager", true); err != nil {
+				return CLStatus{}, fmt.Errorf("start CloudLinux Manager: %w", err)
+			}
+			return clStatus(ctx), nil
+		})
+
 	agent.Register(r, "cl.install_integration", 1, func(ctx context.Context, _ struct{}) (CLStatus, error) {
 		if !fileExists(clDetect) {
 			return CLStatus{}, &agent.DeniedError{Reason: "CloudLinux is not installed on this server"}
@@ -149,7 +174,9 @@ func clStatus(ctx context.Context) CLStatus {
 			"selectorctl": fileExists("/usr/bin/selectorctl"),
 		},
 		Integration: cloudlinux.Installed(),
+		Manager:     cloudlinux.ManagerInstalled(),
 	}
+	out.ManagerRunning = out.Manager && cloudlinux.ManagerRunning()
 	if !out.Tools["cldetect"] {
 		return out
 	}

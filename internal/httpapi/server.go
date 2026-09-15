@@ -298,6 +298,7 @@ func (s *Server) routes() http.Handler {
 				ar.Put("/php/versions/{version}/settings", s.handlePHPSettingsSave)
 				ar.Post("/webserver/sync", s.handleWebserverSync)
 				ar.Get("/cloudlinux", s.handleCloudLinux)
+				ar.Post("/cloudlinux/manager", s.handleCloudLinuxManagerInstall)
 				ar.Post("/cloudlinux/integration", s.handleCloudLinuxIntegration)
 				ar.Get("/webserver/backends", s.handleWebserverBackends)
 				ar.Post("/webserver/switch", s.handleWebserverSwitch)
@@ -334,6 +335,21 @@ func (s *Server) routes() http.Handler {
 				ar.Post("/users/{id}/parent", s.handleUserParentSet)
 			})
 		})
+	})
+
+	// CloudLinux Manager, proxied to the service that serves it. Mounted here
+	// rather than under /api because the Manager builds its own links from
+	// the base_uri the integration file gives it, and that has to be a path
+	// the browser can ask for.
+	//
+	// Administrators only. It manages every account's limits, and the Manager
+	// itself decides what to show from the identity this panel gives it --
+	// which means the panel has to be the thing deciding who may ask.
+	r.Route("/lvemanager", func(lm chi.Router) {
+		lm.Use(s.authenticate)
+		lm.Use(s.requireRole(auth.RoleAdmin))
+		lm.Handle("/*", s.lveManagerProxy())
+		lm.Handle("/", s.lveManagerProxy())
 	})
 
 	// phpMyAdmin, proxied to its loopback vhost. Behind the session check,
