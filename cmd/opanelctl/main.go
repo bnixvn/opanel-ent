@@ -21,9 +21,11 @@ import (
 	"github.com/bnixvn/opanel-ent/internal/agent/actions"
 	"github.com/bnixvn/opanel-ent/internal/agentclient"
 	"github.com/bnixvn/opanel-ent/internal/auth"
+	"github.com/bnixvn/opanel-ent/internal/cloudlinux"
 	"github.com/bnixvn/opanel-ent/internal/config"
 	"github.com/bnixvn/opanel-ent/internal/db"
 	"github.com/bnixvn/opanel-ent/internal/installer"
+	"github.com/bnixvn/opanel-ent/internal/phpmgr"
 	"github.com/bnixvn/opanel-ent/internal/platform/linuxuser"
 	"github.com/bnixvn/opanel-ent/internal/version"
 
@@ -46,6 +48,8 @@ Usage:
   opanelctl user create-admin <name>    create an administrator
   opanelctl user create <name> <role>   create a user (admin|reseller|end_user)
   opanelctl user list                   list panel users
+  opanelctl cloudlinux install          let CloudLinux read this panel
+  opanelctl cloudlinux cpapi <script>   answer one CloudLinux query
   opanelctl passkeys off                stop asking for passkeys, server-wide
   opanelctl passkeys forget <name>      remove one account's passkeys
   opanelctl cert issue <domain> [email] obtain a Let's Encrypt certificate
@@ -93,6 +97,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return cmdCert(ctx, args[1:])
 	case "passkeys":
 		return cmdPasskeys(ctx, args[1:])
+	case "cloudlinux":
+		return cmdCloudLinux(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q (try: opanelctl -h)", args[0])
 	}
@@ -641,4 +647,61 @@ func createUser(ctx context.Context, username string, role auth.Role) error {
 	fmt.Printf("password: %s\n", password[0])
 	fmt.Println("Store it now: it is not recoverable and will not be shown again.")
 	return nil
+}
+
+// cmdCloudLinux drives the integration CloudLinux expects from a panel it
+// does not otherwise know.
+//
+// "install" writes /opt/cpvendor/etc/integration.ini and the small programs
+// it names; "cpapi" is what those programs run. Both live here rather than in
+// the API because CloudLinux calls them as programs, and because they have to
+// keep working when the panel is the thing that is broken.
+func cmdCloudLinux(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("cloudlinux: want 'install' or 'cpapi <script>'")
+	}
+	switch args[0] {
+	case "install":
+		if err := cloudlinux.Install(); err != nil {
+			return err
+		}
+		fmt.Printf("Wrote %s and %d scripts in %s.\n",
+			cloudlinux.ConfigPath, len(cloudlinux.Scripts), cloudlinux.ScriptDir)
+		fmt.Println("CloudLinux's components can now read this panel's accounts,")
+		fmt.Println("domains and packages.")
+		return nil
+
+	case "cpapi":
+		if len(args) < 2 {
+			return fmt.Errorf("cloudlinux cpapi: want one of %v", cloudlinux.Scripts)
+		}
+		cfg, database, err := openDB(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = database.Close() }()
+
+		api := &cloudlinux.API{
+			Store:    database,
+			PHP:      phpmgr.ForBackend(backends.Active()),
+			PanelURL: panelURL(cfg),
+		}
+		return api.Run(ctx, os.Stdout, args[1], args[2:])
+
+	default:
+		return fmt.Errorf("cloudlinux: unknown command %q", args[0])
+	}
+}
+
+// panelURL is where CloudLinux should send somebody who wants to sign in.
+func panelURL(cfg *config.Config) string {
+	host := cfg.PanelHost
+	if host == "" {
+		return ""
+	}
+	_, port, ok := strings.Cut(cfg.ListenAddr, ":")
+	if !ok {
+		port = "2222"
+	}
+	return "https://" + host + ":" + port + "/"
 }

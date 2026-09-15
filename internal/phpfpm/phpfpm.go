@@ -222,13 +222,31 @@ func Apply(ctx context.Context, p phpmgr.FPMProvider, pools []Pool) error {
 		unit := p.ServiceUnit(version)
 		switch {
 		case len(byVersion[version]) == 0:
+			st, err := svc.Get(ctx, unit)
+			if err != nil || st.Enabled == "not-found" {
+				// The version is not installed. Asking systemd to disable a
+				// unit that does not exist is an error, and making the whole
+				// apply fail over a version nobody asked for is worse than
+				// the tidying it was trying to do.
+				continue
+			}
 			// Nothing uses this version. Stopping it is not tidiness: each
 			// idle pool manager holds a master process and its children, and
 			// seven installed versions all running is most of a gigabyte
 			// spent serving nobody.
-			if st, err := svc.Get(ctx, unit); err == nil && st.Running() {
+			if st.Running() {
 				if err := svc.Stop(ctx, unit); err != nil {
 					return fmt.Errorf("phpfpm: stop %s: %w", unit, err)
+				}
+			}
+			// Disabled as well as stopped. A version left enabled with no
+			// pools starts at the next boot, finds nothing to serve, and
+			// exits with "No pool defined" -- so a host comes back up with a
+			// failed service for every version a site once used and no
+			// longer does.
+			if st.Enabled == "enabled" {
+				if err := svc.Disable(ctx, unit, false); err != nil {
+					return fmt.Errorf("phpfpm: disable %s: %w", unit, err)
 				}
 			}
 		case changed[version]:
@@ -260,7 +278,42 @@ func Prepare(ctx context.Context, p phpmgr.FPMProvider, serverUser string) error
 	if err := ensureSocketDir(serverUser); err != nil {
 		return err
 	}
+	if err := ensureSocketDirSurvivesBoot(serverUser); err != nil {
+		return err
+	}
 	return dropVendorWants(ctx, p)
+}
+
+// ensureSocketDirSurvivesBoot writes the tmpfiles rule that recreates the
+// socket directory at boot.
+//
+// /run is a tmpfs: everything in it is gone after a restart. The directory
+// was created when the panel last applied a configuration, which is the wrong
+// moment -- PHP-FPM starts at boot, finds no directory to put its socket in,
+// and exits with a configuration error. Every PHP site on the host is then
+// down until somebody happens to change a setting.
+//
+// Found by rebooting. Nothing else finds it: the panel works perfectly from
+// the moment it is installed until the first restart.
+func ensureSocketDirSurvivesBoot(owner string) error {
+	if owner == "" {
+		owner = "apache"
+	}
+	const path = "/etc/tmpfiles.d/opanel-fpm.conf"
+	body := fmt.Sprintf(`# Written by OPanel.
+#
+# /run is a tmpfs, so this directory has to be recreated at every boot,
+# before php-fpm starts and looks for somewhere to put its sockets.
+# 0710 root:%s: the server may traverse it, nobody else.
+d /run/opanel-fpm 0710 root %s -
+`, owner, owner)
+	if old, err := os.ReadFile(path); err == nil && string(old) == body {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("phpfpm: write %s: %w", path, err)
+	}
+	return nil
 }
 
 // ensureSocketDir creates the directory the sockets live in, traversable by
