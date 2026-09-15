@@ -288,6 +288,17 @@ type ServerConfig struct {
 	// LVEFPMSocket is the pool the server proxies it to.
 	LVEFPMSocket string
 
+	// ServerAppUser is the account the panel's own PHP applications run as,
+	// and PanelAppLSPHPHandler is the handler LiteSpeed runs them under.
+	//
+	// Both exist for LiteSpeed only. Apache reaches these through a pool that
+	// already carries the account; LiteSpeed spawns its own interpreter and
+	// has nothing else to go on, so without them it served CloudLinux Manager
+	// as "nobody" with the alt-php it falls back to -- 7.2 -- and the
+	// Manager's PHP 8 syntax failed to parse.
+	ServerAppUser        string
+	PanelAppLSPHPHandler string
+
 	// WAFRulesFile is the ModSecurity configuration to load, empty when the
 	// engine or its rules are not installed.
 	//

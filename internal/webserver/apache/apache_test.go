@@ -290,3 +290,52 @@ func TestRenderReportsWhereVhostsLive(t *testing.T) {
 		}
 	}
 }
+
+// Under Apache the pool carries the account, so nothing in the vhost has to
+// say who a site belongs to. LiteSpeed spawns its own interpreter and has
+// nothing else to go on: measured, with no SuexecUserGroup it ran every site
+// as "nobody" -- able to read a world-readable index.php and not the 0600
+// wp-config.php beside it. One uid for every customer is the thing per-site
+// PHP exists to prevent, so this is the line that must never go missing.
+func TestLiteSpeedIsToldWhichAccountASiteRunsAs(t *testing.T) {
+	site := testSite("owned.example", "custa", webserver.AppPHP, "8.4")
+	site.LSPHPHandler = "application/x-httpd-alt-php84"
+
+	r := render(t, webserver.DefaultServerConfig(), []webserver.Site{site})
+	out := string(siteVhost(t, r, site.Domain))
+
+	i := strings.Index(out, "<IfModule LiteSpeed>")
+	j := strings.Index(out, "SuexecUserGroup custa custa")
+	k := strings.Index(out, "</IfModule>")
+	if i < 0 || j < i || k < j {
+		t.Errorf("no SuexecUserGroup inside the LiteSpeed block:\n%s", out)
+	}
+	// Outside the block it would be Apache's to read, and Apache without
+	// mod_suexec refuses to start on an unknown directive.
+	if strings.Count(out, "SuexecUserGroup") != 1 {
+		t.Errorf("SuexecUserGroup appears %d times; it belongs only inside <IfModule LiteSpeed>",
+			strings.Count(out, "SuexecUserGroup"))
+	}
+}
+
+// The panel's own PHP applications need the same treatment, and did not get
+// it: LiteSpeed served CloudLinux Manager with the interpreter it falls back
+// to, which was alt-php 7.2, and the Manager's PHP 8 syntax failed to parse.
+func TestPanelApplicationsGetALiteSpeedInterpreterToo(t *testing.T) {
+	cfg := webserver.DefaultServerConfig()
+	cfg.LVERoot, cfg.LVEPort = "/usr/share/opanel/lvemanager", 8082
+	cfg.LVEFPMSocket = "/run/opanel-fpm/lvemanager.sock"
+	cfg.PMARoot, cfg.PMAPort = "/usr/share/phpmyadmin", 8081
+	cfg.PMAFPMSocket = "/run/opanel-fpm/pma.sock"
+	cfg.ServerAppUser = "opanel"
+	cfg.PanelAppLSPHPHandler = "application/x-httpd-alt-php84"
+
+	main := string(render(t, cfg, nil).Main.Content)
+
+	if n := strings.Count(main, "AddHandler application/x-httpd-alt-php84 .php"); n != 2 {
+		t.Errorf("%d of the panel's two PHP applications carry a LiteSpeed handler, want 2:\n%s", n, main)
+	}
+	if n := strings.Count(main, "SuexecUserGroup opanel opanel"); n != 2 {
+		t.Errorf("%d of them say which account to run as, want 2", n)
+	}
+}

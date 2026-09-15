@@ -119,6 +119,14 @@
     # interpreter it ships with, 7.2, and says nothing. A site written for
     # {{ .Site.PHPVersion }} would quietly run on that instead.
     <IfModule LiteSpeed>
+        # Which account the interpreter runs as. Apache does not need telling
+        # -- the pool above already belongs to this site's user -- but
+        # LiteSpeed spawns its own, and with nothing to go on it runs every
+        # site on the server as "nobody". Measured: with this line absent,
+        # lsphp could read a world-readable index.php and not the 0600
+        # wp-config.php beside it, because it was not the owner. One uid for
+        # every customer is the thing per-site PHP exists to prevent.
+        SuexecUserGroup {{ .Site.OwnerUser }} {{ .Site.OwnerGroup }}
         AddHandler {{ .Site.LSPHPHandler }} .php
     </IfModule>
 {{- end }}

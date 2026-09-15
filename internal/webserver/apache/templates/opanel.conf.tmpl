@@ -67,6 +67,13 @@ Listen {{ . }}
         SetHandler "proxy:unix:{{ .Config.PMAFPMSocket }}|fcgi://localhost"
     </FilesMatch>
 {{- end }}
+{{- if .Config.PanelAppLSPHPHandler }}
+
+    <IfModule LiteSpeed>
+        SuexecUserGroup {{ .Config.ServerAppUser }} {{ .Config.ServerAppUser }}
+        AddHandler {{ .Config.PanelAppLSPHPHandler }} .php
+    </IfModule>
+{{- end }}
 </VirtualHost>
 {{- end }}
 {{- if and .Config.LVERoot .Config.LVEPort }}
@@ -95,6 +102,16 @@ Listen {{ . }}
     <FilesMatch "\.php$">
         SetHandler "proxy:unix:{{ .Config.LVEFPMSocket }}|fcgi://localhost"
     </FilesMatch>
+{{- end }}
+{{- if .Config.PanelAppLSPHPHandler }}
+
+    # As above, and for the same reason. Without it LiteSpeed served
+    # CloudLinux Manager with the interpreter it falls back to, which was
+    # alt-php 7.2, and the Manager's own PHP 8 syntax failed to parse.
+    <IfModule LiteSpeed>
+        SuexecUserGroup {{ .Config.ServerAppUser }} {{ .Config.ServerAppUser }}
+        AddHandler {{ .Config.PanelAppLSPHPHandler }} .php
+    </IfModule>
 {{- end }}
 </VirtualHost>
 {{- end }}

@@ -24,6 +24,9 @@ import (
 // take: the panel refuses to create a site under .opanel.
 const pmaPoolName = "phpmyadmin.opanel"
 
+// pmaPoolUser is the account the panel's own PHP applications run as.
+const pmaPoolUser = "opanel"
+
 // WebserverListResult describes every backend the panel can run.
 type WebserverListResult struct {
 	Active   string           `json:"active"`
@@ -283,8 +286,8 @@ func pmaPool(cfg webserver.ServerConfig) phpfpm.Pool {
 	return phpfpm.Pool{
 		Name:        pmaPoolName,
 		Version:     PMAPHPVersion,
-		User:        "opanel",
-		Group:       "opanel",
+		User:        pmaPoolUser,
+		Group:       pmaPoolUser,
 		Socket:      cfg.PMAFPMSocket,
 		MaxChildren: 5,
 		Basedir:     cfg.PMARoot,
@@ -333,6 +336,10 @@ func lvePool(cfg webserver.ServerConfig) phpfpm.Pool {
 // by another would 502 with nothing in any log to say why.
 func panelAppConfig(cfg *webserver.ServerConfig, p phpmgr.Provider) {
 	fp, pooled := p.(phpmgr.FPMProvider)
+	// The account these run as, and what LiteSpeed would run them with. Both
+	// are the panel's own rather than any customer's.
+	cfg.ServerAppUser = pmaPoolUser
+	cfg.PanelAppLSPHPHandler = lsphpHandler(PMAPHPVersion)
 	if st := pmaStatus(); st.Installed {
 		cfg.PMARoot = st.Root
 		cfg.PMAPort = PMAPort
